@@ -1,0 +1,1306 @@
+//@version=5
+indicator("ACE BY TRADENITI", overlay=true, max_labels_count=500, max_lines_count=500)
+
+
+// ========== इनपुट ==========
+fiblength = input.int(264, "Pivot Fibonacci Length", minval=1)
+showTable = input.bool(true, "Show Position Table")
+enableReentry = input.bool(true, "Enable Re-Entry Strategy")
+enableShortAfterPrimaryLoss = input.bool(true, "Enable Short After Primary Loss")
+enableGeneralShort = input.bool(true, "Enable General Short Strategy")
+
+
+// ========== Fibonacci Pivot Lines ==========
+maxr = ta.highest(close, fiblength)
+minr = ta.lowest(close, fiblength)
+TOP_LINE = maxr
+BOTTOM_LINE = minr
+PIVOT_LINE = maxr - 0.50 * (maxr - minr)
+
+
+// ========== Plot Lines ==========
+plot(TOP_LINE, "Top", color.white, 2)
+plot(PIVOT_LINE, "Pivot", color.white, 1)
+plot(BOTTOM_LINE, "Bottom", color.white, 2)
+
+
+// ========== RSI & SMA ==========
+rsi = ta.rsi(close, 14)
+sma2 = ta.sma(close, 2)
+
+
+// ========== Position Tracking (LONG) ==========
+var bool inPosition = false
+var float buyEntry = na
+var float stopLoss = na
+var int slStage = 0
+var bool lastTradeWasProfit = false
+var bool primaryBlocked = false
+var int secondaryConsecutiveLosses = 0
+var int reentryConsecutiveLosses = 0
+var bool bothStrategiesDisabled = false
+var bool reentryDisabled = false
+var bool currentTradeIsPrimary = false
+var bool currentTradeIsSecondary = false
+var bool currentTradeIsReentry = false
+
+
+// ========================================
+// ========== SHORT POSITION TRACKING ==========
+// ========================================
+var bool inShortPosition = false
+var float shortEntry = na
+var float shortStopLoss = na
+var int shortEntryBar = na
+var bool isGeneralShort = false
+// ========================================
+
+
+// ========== Daily Reset ==========
+newDay = ta.change(time("D"))
+if newDay
+    bothStrategiesDisabled := false
+    secondaryConsecutiveLosses := 0
+    reentryConsecutiveLosses := 0
+    reentryDisabled := false
+
+
+// ========== Tolerance Ranges ==========
+toleranceAmount = BOTTOM_LINE * 0.004
+upperTolerance = BOTTOM_LINE + toleranceAmount
+lowerTolerance = BOTTOM_LINE - toleranceAmount
+
+
+pivotRecoveryThreshold = PIVOT_LINE + (PIVOT_LINE * 0.003)
+pivotReentryThreshold = PIVOT_LINE + (PIVOT_LINE * 0.002)
+
+
+// ========== Plot Zones ==========
+p1 = plot(upperTolerance, "Upper", color.new(color.green, 80), 1)
+p2 = plot(lowerTolerance, "Lower", color.new(color.green, 80), 1)
+fill(p1, p2, color.new(color.green, 90))
+
+
+plot(pivotRecoveryThreshold, "Recovery", color.new(color.purple, 50), 2, plot.style_circles)
+plot(pivotReentryThreshold, "Re-Entry", color.new(color.orange, 70), 1, plot.style_circles)
+plot(sma2, "SMA2", color.new(color.yellow, 50), 1)
+
+
+// ========== RECOVERY LOGIC ==========
+sma2RecoveryCrossover = ta.crossover(sma2, pivotRecoveryThreshold)
+
+
+if bothStrategiesDisabled and sma2RecoveryCrossover and not inPosition and not inShortPosition
+    bothStrategiesDisabled := false
+    primaryBlocked := false
+    secondaryConsecutiveLosses := 0
+    reentryConsecutiveLosses := 0
+    reentryDisabled := false
+    lastTradeWasProfit := false
+    label.new(bar_index, high, text="🔄 RESET", color=color.new(color.purple, 0), textcolor=color.white, style=label.style_label_down, size=size.small)
+
+
+// ========== PRIMARY STRATEGY ==========
+rsiInRange = rsi >= 20 and rsi <= 29
+priceInRange = close >= lowerTolerance and close <= upperTolerance
+PRIMARY_BUY = rsiInRange and priceInRange and not inPosition and not inShortPosition and not primaryBlocked and not bothStrategiesDisabled
+
+
+// ========== SECONDARY STRATEGY (WITH FILTERS) ==========
+sma2CrossoverBuy = ta.crossover(sma2, upperTolerance)
+
+
+// NEW FILTERS
+rsiNotOverbought = rsi <= 75
+minDistanceFromPivot = (PIVOT_LINE - upperTolerance) >= 300
+
+
+// UPDATED: Secondary can happen even when SHORT is active
+SECONDARY_BUY_AFTER_LOSS = sma2CrossoverBuy and not inPosition and primaryBlocked and not bothStrategiesDisabled and rsiNotOverbought and minDistanceFromPivot
+SECONDARY_BUY_AFTER_PROFIT = sma2CrossoverBuy and not inPosition and lastTradeWasProfit and not bothStrategiesDisabled and rsiNotOverbought and minDistanceFromPivot
+
+
+SECONDARY_BUY = SECONDARY_BUY_AFTER_LOSS or SECONDARY_BUY_AFTER_PROFIT
+
+
+// ========== RE-ENTRY STRATEGY ==========
+noActivePosition = not inPosition and not inShortPosition
+secondaryNotDisabled = not bothStrategiesDisabled
+noPendingPrimarySecondary = not PRIMARY_BUY and not SECONDARY_BUY
+
+
+sma2ReentryCrossover = ta.crossover(sma2, pivotReentryThreshold)
+safetyCheck = close < (TOP_LINE - 200)
+
+
+REENTRY_BUY = enableReentry and sma2ReentryCrossover and noActivePosition and secondaryNotDisabled and noPendingPrimarySecondary and safetyCheck and not reentryDisabled
+
+
+// ========== BUY SIGNAL ==========
+BUY_SIGNAL = PRIMARY_BUY or SECONDARY_BUY or REENTRY_BUY
+
+
+// ========================================
+// ========== SHORT STRATEGY SECTION (SEPARATE CODE) ==========
+// ========================================
+
+
+// Calculate current SHORT PnL
+currentShortPnL = inShortPosition ? (shortEntry - close) : 0.0
+shortInProfit = currentShortPnL > 0
+
+
+// SIMPLE EXIT LOGIC: Exit only if in profit, otherwise wait for SL
+if inShortPosition and sma2CrossoverBuy
+    // Only exit if SHORT is in profit
+    if shortInProfit
+        shortExitPrice = close
+        shortPnl = shortEntry - shortExitPrice
+        
+        inShortPosition := false
+        
+        shortPnlSign = shortPnl > 0 ? "+" : ""
+        shortLabel = "SHORT " + shortPnlSign + str.tostring(shortPnl, "#")
+        shortLabelColor = color.new(#15803D, 0)
+        
+        label.new(bar_index, low * 0.9985, text=shortLabel + " ✅", color=shortLabelColor, textcolor=color.white, style=label.style_label_up, size=size.small)
+        
+        shortEntry := na
+        shortStopLoss := na
+        shortEntryBar := na
+        isGeneralShort := false
+    // If not in profit, ignore exit call and wait for SL
+
+
+// SHORT Stop Loss Hit - INTRA-BAR CHECK (using high instead of close)
+if inShortPosition and high >= shortStopLoss
+    // Short SL hit (loss) - exit at SL price, not candle close
+    shortExitPrice = shortStopLoss  // Exit exactly at SL price
+    shortPnl = shortEntry - shortExitPrice
+    
+    inShortPosition := false
+    
+    label.new(bar_index, high, text="SHORT " + str.tostring(shortPnl, "#") + " ❌", color=color.new(#8B0000, 0), textcolor=color.white, style=label.style_label_down, size=size.small)
+    
+    shortEntry := na
+    shortStopLoss := na
+    shortEntryBar := na
+    isGeneralShort := false
+
+
+// Plot SHORT Lines
+plot(inShortPosition ? shortStopLoss : na, "Short SL", color.orange, 2, plot.style_linebr)
+plot(inShortPosition ? shortEntry : na, "Short Entry", color.purple, 1, plot.style_linebr)
+
+
+// SHORT Shape on Chart
+plotshape(inShortPosition and bar_index == shortEntryBar, title="Short Entry", style=shape.triangledown, location=location.abovebar, color=color.new(#8B0000, 0), size=size.normal)
+
+
+// ========================================
+// ========== END OF SHORT STRATEGY SECTION ==========
+// ========================================
+
+
+// ========== BUY EXECUTION ==========
+if BUY_SIGNAL
+    inPosition := true
+    buyEntry := close
+    slStage := 1
+    
+    if PRIMARY_BUY
+        currentTradeIsPrimary := true
+        currentTradeIsSecondary := false
+        currentTradeIsReentry := false
+        stopLoss := buyEntry - 500
+        lastTradeWasProfit := false
+        label.new(bar_index, low, text="🟢 PRI", color=color.new(#006400, 0), textcolor=color.white, style=label.style_label_up, size=size.small)
+    
+    else if SECONDARY_BUY
+        currentTradeIsPrimary := false
+        currentTradeIsSecondary := true
+        currentTradeIsReentry := false
+        
+        stopLoss := secondaryConsecutiveLosses >= 1 ? BOTTOM_LINE - 300 : BOTTOM_LINE - 400
+        lastTradeWasProfit := false
+        
+        slIcon = secondaryConsecutiveLosses >= 1 ? "⚠️" : ""
+        label.new(bar_index, low, text="🔵 SEC " + slIcon, color=color.new(#00CED1, 0), textcolor=color.white, style=label.style_label_up, size=size.small)
+    
+    else if REENTRY_BUY
+        currentTradeIsPrimary := false
+        currentTradeIsSecondary := false
+        currentTradeIsReentry := true
+        stopLoss := PIVOT_LINE - 250
+        slStage := 3
+        lastTradeWasProfit := false
+        label.new(bar_index, low, text="🟠 RE", color=color.new(#CC5500, 0), textcolor=color.white, style=label.style_label_up, size=size.small)
+
+
+// ========== TRAILING STOP LOGIC ==========
+if inPosition
+    if currentTradeIsPrimary
+        if slStage == 1 and close > PIVOT_LINE
+            stopLoss := PIVOT_LINE - 450
+            slStage := 2
+        
+        if slStage == 2 and close >= (TOP_LINE - TOP_LINE * 0.004)
+            slStage := 3
+        
+        if slStage == 3
+            stopLoss := PIVOT_LINE - 250
+    
+    else if currentTradeIsSecondary
+        if slStage == 1 and close >= (PIVOT_LINE - PIVOT_LINE * 0.004)
+            stopLoss := BOTTOM_LINE - 200
+            slStage := 2
+        
+        if slStage == 2 and close >= (TOP_LINE - TOP_LINE * 0.004)
+            slStage := 3
+        
+        if slStage == 3
+            stopLoss := PIVOT_LINE - 250
+    
+    else if currentTradeIsReentry
+        stopLoss := PIVOT_LINE - 250
+
+
+// ========== STOP LOSS HIT (LONG) - INTRA-BAR CHECK ==========
+// Using 'low' instead of 'close' to check if SL was hit during the bar
+if inPosition and low <= stopLoss
+    // Exit at SL price, not at candle close
+    exitPrice = stopLoss
+    pnl = exitPrice - buyEntry
+    
+    string statusEmoji = ""
+    bool primaryLossOccurred = false
+    
+    if pnl > 0
+        lastTradeWasProfit := true
+        secondaryConsecutiveLosses := 0
+        reentryConsecutiveLosses := 0
+        
+        if currentTradeIsSecondary or currentTradeIsReentry
+            primaryBlocked := false
+            reentryDisabled := false
+        
+        statusEmoji := " ✅"
+    
+    else
+        lastTradeWasProfit := false
+        
+        if currentTradeIsPrimary
+            primaryBlocked := true
+            secondaryConsecutiveLosses := 0
+            primaryLossOccurred := true
+            statusEmoji := " 🟡"
+        
+        else if currentTradeIsSecondary
+            secondaryConsecutiveLosses += 1
+            
+            if secondaryConsecutiveLosses >= 2
+                bothStrategiesDisabled := true
+                reentryDisabled := true
+                statusEmoji := " 🛑"
+            else
+                statusEmoji := " ⚠️"
+        
+        else if currentTradeIsReentry
+            reentryConsecutiveLosses += 1
+            
+            if reentryConsecutiveLosses >= 2
+                reentryDisabled := true
+                statusEmoji := " 🔴"
+            else
+                statusEmoji := " 🟠"
+    
+    inPosition := false
+    buyEntry := na
+    stopLoss := na
+    slStage := 0
+    
+    tradeName = currentTradeIsPrimary ? "PRI" : currentTradeIsSecondary ? "SEC" : "RE"
+    pnlSign = pnl > 0 ? "+" : ""
+    labelText = tradeName + " " + pnlSign + str.tostring(pnl, "#") + statusEmoji
+    labelColor = pnl > 0 ? color.new(#006400, 0) : color.new(#8B0000, 0)
+    
+    label.new(bar_index, high, text=labelText, color=labelColor, textcolor=color.white, style=label.style_label_down, size=size.normal)
+    
+    currentTradeIsPrimary := false
+    currentTradeIsSecondary := false
+    currentTradeIsReentry := false
+    
+    // ========================================
+    // ========== TRIGGER SHORT AFTER PRIMARY LOSS ==========
+    // ========================================
+    if primaryLossOccurred and enableShortAfterPrimaryLoss
+        shortEntry := close
+        shortStopLoss := close + 400
+        inShortPosition := true
+        shortEntryBar := bar_index
+        isGeneralShort := false
+        label.new(bar_index, high * 1.001, text="🔴 SHORT", color=color.new(#8B0000, 0), textcolor=color.white, style=label.style_label_down, size=size.small)
+    // ========================================
+
+
+// ========== PLOT SHAPES (LONG STRATEGIES) ==========
+plotshape(PRIMARY_BUY, title="Primary", style=shape.triangleup, location=location.belowbar, color=color.new(#006400, 0), size=size.small)
+plotshape(SECONDARY_BUY, title="Secondary", style=shape.triangleup, location=location.belowbar, color=color.new(#00CED1, 0), size=size.normal)
+plotshape(REENTRY_BUY, title="Re-Entry", style=shape.triangleup, location=location.belowbar, color=color.new(#CC5500, 0), size=size.normal)
+
+
+// ========== PLOT SL & ENTRY (LONG) ==========
+plot(inPosition ? stopLoss : na, "Stop Loss", color.red, 2, plot.style_linebr)
+plot(inPosition ? buyEntry : na, "Entry", color.blue, 1, plot.style_linebr)
+
+
+// ========================================
+// ========== RSI DIVERGENCE & EXTREME LEVELS SECTION ==========
+// ========================================
+
+
+// Track pivot highs and lows in price and RSI
+lookback = 5  // Look back 5 bars for pivot detection
+
+
+// Detect pivot highs (peak)
+pivotHigh = ta.pivothigh(high, lookback, lookback)
+pivotHighRSI = ta.pivothigh(rsi, lookback, lookback)
+
+
+// Detect pivot lows (valley)
+pivotLow = ta.pivotlow(low, lookback, lookback)
+pivotLowRSI = ta.pivotlow(rsi, lookback, lookback)
+
+
+// Store last pivot values
+var float lastPivotHighPrice = na
+var float lastPivotHighRSI = na
+var int lastPivotHighBar = na
+
+
+var float lastPivotLowPrice = na
+var float lastPivotLowRSI = na
+var int lastPivotLowBar = na
+
+
+// Update pivot high tracking
+if not na(pivotHigh)
+    if not na(lastPivotHighPrice)
+        // Check for NEGATIVE divergence (Bearish)
+        // Price makes higher high, RSI makes lower high
+        if high[lookback] > lastPivotHighPrice and pivotHighRSI < lastPivotHighRSI
+            label.new(bar_index - lookback, high[lookback], text="-DIV", color=color.new(color.red, 0), textcolor=color.white, style=label.style_label_down, size=size.normal, yloc=yloc.abovebar)
+    
+    lastPivotHighPrice := high[lookback]
+    lastPivotHighRSI := pivotHighRSI
+    lastPivotHighBar := bar_index - lookback
+
+
+// Update pivot low tracking
+if not na(pivotLow)
+    if not na(lastPivotLowPrice)
+        // Check for POSITIVE divergence (Bullish)
+        // Price makes lower low, RSI makes higher low
+        if low[lookback] < lastPivotLowPrice and pivotLowRSI > lastPivotLowRSI
+            label.new(bar_index - lookback, low[lookback], text="+DIV", color=color.new(color.green, 0), textcolor=color.white, style=label.style_label_up, size=size.normal, yloc=yloc.belowbar)
+    
+    lastPivotLowPrice := low[lookback]
+    lastPivotLowRSI := pivotLowRSI
+    lastPivotLowBar := bar_index - lookback
+
+
+// ========================================
+// ========== END OF RSI DIVERGENCE & EXTREME LEVELS SECTION ==========
+// ========================================
+
+
+// ========================================
+// ========== GENERAL SHORT STRATEGY ==========
+// ========================================
+
+
+
+
+
+
+
+// ========================================
+// ========== GENERAL SHORT STRATEGY ==========
+// ========================================
+
+// Create tolerance lines for TOP_LINE
+topToleranceAmount = TOP_LINE * 0.004
+topUpperTolerance = TOP_LINE + topToleranceAmount
+topLowerTolerance = TOP_LINE - topToleranceAmount
+
+// Plot top tolerance zones
+p3 = plot(topUpperTolerance, "Top Upper", color.new(color.red, 80), 1)
+p4 = plot(topLowerTolerance, "Top Lower", color.new(color.red, 80), 1)
+fill(p3, p4, color.new(color.red, 90))
+
+// Check if last 3 candles were in top tolerance zone
+priceNearTopZone = (close[2] >= topLowerTolerance and close[2] <= topUpperTolerance) or 
+                   (close[1] >= topLowerTolerance and close[1] <= topUpperTolerance) or 
+                   (close >= topLowerTolerance and close <= topUpperTolerance)
+
+// Conditions
+rsiWasAbove84 = rsi[1] > 84
+rsiDropping = rsi < rsi[1]
+redCandleAfterGreen = close < open and close[1] > open[1]
+
+GENERAL_SHORT_SIGNAL = priceNearTopZone and rsiWasAbove84 and rsiDropping and redCandleAfterGreen
+
+if GENERAL_SHORT_SIGNAL
+    label.new(bar_index, high, text="🟣 G SHORT", color=color.new(#6B21A8, 0), textcolor=color.white, style=label.style_label_down, size=size.normal)
+
+// ========================================
+// ========== END ==========
+// ========================================
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// Create tolerance lines for TOP_LINE
+// topToleranceAmount = TOP_LINE * 0.002
+// topUpperTolerance = TOP_LINE + topToleranceAmount
+// topLowerTolerance = TOP_LINE - topToleranceAmount
+
+// // Plot top tolerance zones
+// p3 = plot(topUpperTolerance, "Top Upper", color.new(color.red, 80), 1)
+// p4 = plot(topLowerTolerance, "Top Lower", color.new(color.red, 80), 1)
+// fill(p3, p4, color.new(color.red, 90))
+
+// // Conditions
+// rsiWasAbove84 = rsi[1] > 86
+// rsiDropping = rsi < rsi[1]
+// redCandleAfterGreen = close < open and close[1] > open[1]
+
+// GENERAL_SHORT_SIGNAL = rsiWasAbove84 and rsiDropping and redCandleAfterGreen
+
+// if GENERAL_SHORT_SIGNAL
+//     label.new(bar_index, high, text="🟣 G SHORT", color=color.new(#6B21A8, 0), textcolor=color.white, style=label.style_label_down, size=size.normal)
+
+// ========================================
+// ========== END ==========
+// ========================================
+
+
+
+
+// ========== TABLE ==========
+if showTable
+    var table t = table.new(position=position.bottom_right, columns=3, rows=2, border_width=2, border_color=color.new(#1E3A8A, 0))
+    
+    table.cell(t, 0, 0, text="LTP", text_color=color.white, bgcolor=color.new(#1E3A8A, 0), text_size=size.small)
+    table.cell(t, 1, 0, text="STATUS", text_color=color.white, bgcolor=color.new(#1E3A8A, 0), text_size=size.small)
+    table.cell(t, 2, 0, text="PNL", text_color=color.white, bgcolor=color.new(#1E3A8A, 0), text_size=size.small)
+    
+    table.cell(t, 0, 1, text=str.tostring(close, "#.##"), text_color=color.white, bgcolor=color.new(#374151, 0), text_size=size.large)
+    
+    strategyText = "READY"
+    strategyColor = color.new(#1E40AF, 0)
+    
+    if bothStrategiesDisabled
+        strategyText := "🛑 STOP"
+        strategyColor := color.new(#991B1B, 0)
+    else if inShortPosition
+        if isGeneralShort
+            strategyText := "🟣 G SHORT"
+            strategyColor := color.new(#6B21A8, 0)
+        else
+            strategyText := "🔴 SHORT"
+            strategyColor := color.new(#8B0000, 0)
+    else if inPosition
+        if currentTradeIsPrimary
+            strategyText := "🟢 PRI"
+            strategyColor := color.new(#15803D, 0)
+        else if currentTradeIsSecondary
+            strategyText := "🔵 SEC"
+            strategyColor := color.new(#00CED1, 0)
+        else if currentTradeIsReentry
+            strategyText := "🟠 RE"
+            strategyColor := color.new(#C2410C, 0)
+    else if primaryBlocked
+        if reentryDisabled
+            strategyText := "🟡 SEC"
+            strategyColor := color.new(#CA8A04, 0)
+        else
+            strategyText := "🟡 S+R"
+            strategyColor := color.new(#CA8A04, 0)
+    else if lastTradeWasProfit
+        strategyText := "✅ ALL"
+        strategyColor := color.new(#15803D, 0)
+    
+    table.cell(t, 1, 1, text=strategyText, text_color=color.white, bgcolor=strategyColor, text_size=size.large)
+    
+    currentPnL = 0.0
+    if inPosition
+        currentPnL := close - buyEntry
+    else if inShortPosition
+        currentPnL := shortEntry - close
+    
+    pnlColor = currentPnL > 0 ? color.new(#15803D, 0) : currentPnL < 0 ? color.new(#991B1B, 0) : color.new(#374151, 0)
+    pnlSign = currentPnL > 0 ? "+" : ""
+    table.cell(t, 2, 1, text=pnlSign + str.tostring(currentPnL, "#.##"), text_color=color.white, bgcolor=pnlColor, text_size=size.large)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// indicator("RSI Fibonacci Pivot V6 - RESET", overlay=true, max_labels_count=500, max_lines_count=500)
+
+// // ========== इनपुट ==========
+// fiblength = input.int(264, "Pivot Fibonacci Length", minval=1)
+// showTable = input.bool(true, "Show Position Table")
+// enableReentry = input.bool(true, "Enable Re-Entry Strategy")
+// enableShortAfterPrimaryLoss = input.bool(true, "Enable Short After Primary Loss")
+
+// // ========== Fibonacci Pivot Lines ==========
+// maxr = ta.highest(close, fiblength)
+// minr = ta.lowest(close, fiblength)
+// TOP_LINE = maxr
+// BOTTOM_LINE = minr
+// PIVOT_LINE = maxr - 0.50 * (maxr - minr)
+
+// // ========== Plot Lines ==========
+// plot(TOP_LINE, "Top", color.white, 2)
+// plot(PIVOT_LINE, "Pivot", color.white, 1)
+// plot(BOTTOM_LINE, "Bottom", color.white, 2)
+
+// // ========== RSI & SMA ==========
+// rsi = ta.rsi(close, 14)
+// sma2 = ta.sma(close, 2)
+
+// // ========== Position Tracking (LONG) ==========
+// var bool inPosition = false
+// var float buyEntry = na
+// var float stopLoss = na
+// var int slStage = 0
+// var bool lastTradeWasProfit = false
+// var bool primaryBlocked = false
+// var int secondaryConsecutiveLosses = 0
+// var int reentryConsecutiveLosses = 0
+// var bool bothStrategiesDisabled = false
+// var bool reentryDisabled = false
+// var bool currentTradeIsPrimary = false
+// var bool currentTradeIsSecondary = false
+// var bool currentTradeIsReentry = false
+
+// // ========================================
+// // ========== SHORT POSITION TRACKING ==========
+// // ========================================
+// var bool inShortPosition = false
+// var float shortEntry = na
+// var float shortStopLoss = na
+// var int shortEntryBar = na
+// // ========================================
+
+// // ========== Daily Reset ==========
+// newDay = ta.change(time("D"))
+// if newDay
+//     bothStrategiesDisabled := false
+//     secondaryConsecutiveLosses := 0
+//     reentryConsecutiveLosses := 0
+//     reentryDisabled := false
+
+// // ========== Tolerance Ranges ==========
+// toleranceAmount = BOTTOM_LINE * 0.004
+// upperTolerance = BOTTOM_LINE + toleranceAmount
+// lowerTolerance = BOTTOM_LINE - toleranceAmount
+
+// pivotRecoveryThreshold = PIVOT_LINE + (PIVOT_LINE * 0.003)
+// pivotReentryThreshold = PIVOT_LINE + (PIVOT_LINE * 0.002)
+
+// // ========== Plot Zones ==========
+// p1 = plot(upperTolerance, "Upper", color.new(color.green, 80), 1)
+// p2 = plot(lowerTolerance, "Lower", color.new(color.green, 80), 1)
+// fill(p1, p2, color.new(color.green, 90))
+
+// plot(pivotRecoveryThreshold, "Recovery", color.new(color.purple, 50), 2, plot.style_circles)
+// plot(pivotReentryThreshold, "Re-Entry", color.new(color.orange, 70), 1, plot.style_circles)
+// plot(sma2, "SMA2", color.new(color.yellow, 50), 1)
+
+// // ========== RECOVERY LOGIC ==========
+// sma2RecoveryCrossover = ta.crossover(sma2, pivotRecoveryThreshold)
+
+// if bothStrategiesDisabled and sma2RecoveryCrossover and not inPosition and not inShortPosition
+//     bothStrategiesDisabled := false
+//     primaryBlocked := false
+//     secondaryConsecutiveLosses := 0
+//     reentryConsecutiveLosses := 0
+//     reentryDisabled := false
+//     lastTradeWasProfit := false
+//     label.new(bar_index, high, text="🔄 RESET", color=color.new(color.purple, 0), textcolor=color.white, style=label.style_label_down, size=size.small)
+
+// // ========== PRIMARY STRATEGY ==========
+// rsiInRange = rsi >= 20 and rsi <= 29
+// priceInRange = close >= lowerTolerance and close <= upperTolerance
+// PRIMARY_BUY = rsiInRange and priceInRange and not inPosition and not inShortPosition and not primaryBlocked and not bothStrategiesDisabled
+
+// // ========== SECONDARY STRATEGY (WITH FILTERS) ==========
+// sma2CrossoverBuy = ta.crossover(sma2, upperTolerance)
+
+// // NEW FILTERS
+// rsiNotOverbought = rsi <= 75
+// minDistanceFromPivot = (PIVOT_LINE - upperTolerance) >= 300
+
+// // UPDATED: Secondary can happen even when SHORT is active
+// SECONDARY_BUY_AFTER_LOSS = sma2CrossoverBuy and not inPosition and primaryBlocked and not bothStrategiesDisabled and rsiNotOverbought and minDistanceFromPivot
+// SECONDARY_BUY_AFTER_PROFIT = sma2CrossoverBuy and not inPosition and lastTradeWasProfit and not bothStrategiesDisabled and rsiNotOverbought and minDistanceFromPivot
+
+// SECONDARY_BUY = SECONDARY_BUY_AFTER_LOSS or SECONDARY_BUY_AFTER_PROFIT
+
+// // ========== RE-ENTRY STRATEGY ==========
+// noActivePosition = not inPosition and not inShortPosition
+// secondaryNotDisabled = not bothStrategiesDisabled
+// noPendingPrimarySecondary = not PRIMARY_BUY and not SECONDARY_BUY
+
+// sma2ReentryCrossover = ta.crossover(sma2, pivotReentryThreshold)
+// safetyCheck = close < (TOP_LINE - 200)
+
+// REENTRY_BUY = enableReentry and sma2ReentryCrossover and noActivePosition and secondaryNotDisabled and noPendingPrimarySecondary and safetyCheck and not reentryDisabled
+
+// // ========== BUY SIGNAL ==========
+// BUY_SIGNAL = PRIMARY_BUY or SECONDARY_BUY or REENTRY_BUY
+
+// // ========================================
+// // ========== SHORT STRATEGY SECTION (SEPARATE CODE) ==========
+// // ========================================
+
+// // Calculate current SHORT PnL
+// currentShortPnL = inShortPosition ? (shortEntry - close) : 0.0
+// shortInProfit = currentShortPnL > 0
+
+// // SIMPLE EXIT LOGIC: Exit only if in profit, otherwise wait for SL
+// if inShortPosition and sma2CrossoverBuy
+//     // Only exit if SHORT is in profit
+//     if shortInProfit
+//         shortExitPrice = close
+//         shortPnl = shortEntry - shortExitPrice
+        
+//         inShortPosition := false
+        
+//         shortPnlSign = shortPnl > 0 ? "+" : ""
+//         shortLabel = "SHORT " + shortPnlSign + str.tostring(shortPnl, "#")
+//         shortLabelColor = color.new(#15803D, 0)
+        
+//         label.new(bar_index, low * 0.9985, text=shortLabel + " ✅", color=shortLabelColor, textcolor=color.white, style=label.style_label_up, size=size.small)
+        
+//         shortEntry := na
+//         shortStopLoss := na
+//         shortEntryBar := na
+//     // If not in profit, ignore exit call and wait for SL
+
+// // SHORT Stop Loss Hit - INTRA-BAR CHECK (using high instead of close)
+// if inShortPosition and high >= shortStopLoss
+//     // Short SL hit (loss) - exit at SL price, not candle close
+//     shortExitPrice = shortStopLoss  // Exit exactly at SL price
+//     shortPnl = shortEntry - shortExitPrice
+    
+//     inShortPosition := false
+    
+//     label.new(bar_index, high, text="SHORT " + str.tostring(shortPnl, "#") + " ❌", color=color.new(#8B0000, 0), textcolor=color.white, style=label.style_label_down, size=size.small)
+    
+//     shortEntry := na
+//     shortStopLoss := na
+//     shortEntryBar := na
+
+// // Plot SHORT Lines
+// plot(inShortPosition ? shortStopLoss : na, "Short SL", color.orange, 2, plot.style_linebr)
+// plot(inShortPosition ? shortEntry : na, "Short Entry", color.purple, 1, plot.style_linebr)
+
+// // SHORT Shape on Chart
+// plotshape(inShortPosition and bar_index == shortEntryBar, title="Short Entry", style=shape.triangledown, location=location.abovebar, color=color.new(#8B0000, 0), size=size.normal)
+
+// // ========================================
+// // ========== END OF SHORT STRATEGY SECTION ==========
+// // ========================================
+
+// // ========== BUY EXECUTION ==========
+// if BUY_SIGNAL
+//     inPosition := true
+//     buyEntry := close
+//     slStage := 1
+    
+//     if PRIMARY_BUY
+//         currentTradeIsPrimary := true
+//         currentTradeIsSecondary := false
+//         currentTradeIsReentry := false
+//         stopLoss := buyEntry - 500
+//         lastTradeWasProfit := false
+//         label.new(bar_index, low, text="🟢 PRI", color=color.new(#006400, 0), textcolor=color.white, style=label.style_label_up, size=size.small)
+    
+//     else if SECONDARY_BUY
+//         currentTradeIsPrimary := false
+//         currentTradeIsSecondary := true
+//         currentTradeIsReentry := false
+        
+//         stopLoss := secondaryConsecutiveLosses >= 1 ? BOTTOM_LINE - 300 : BOTTOM_LINE - 400
+//         lastTradeWasProfit := false
+        
+//         slIcon = secondaryConsecutiveLosses >= 1 ? "⚠️" : ""
+//         label.new(bar_index, low, text="🔵 SEC " + slIcon, color=color.new(#00CED1, 0), textcolor=color.white, style=label.style_label_up, size=size.small)
+    
+//     else if REENTRY_BUY
+//         currentTradeIsPrimary := false
+//         currentTradeIsSecondary := false
+//         currentTradeIsReentry := true
+//         stopLoss := PIVOT_LINE - 250
+//         slStage := 3
+//         lastTradeWasProfit := false
+//         label.new(bar_index, low, text="🟠 RE", color=color.new(#CC5500, 0), textcolor=color.white, style=label.style_label_up, size=size.small)
+
+// // ========== TRAILING STOP LOGIC ==========
+// if inPosition
+//     if currentTradeIsPrimary
+//         if slStage == 1 and close > PIVOT_LINE
+//             stopLoss := PIVOT_LINE - 450
+//             slStage := 2
+        
+//         if slStage == 2 and close >= (TOP_LINE - TOP_LINE * 0.004)
+//             slStage := 3
+        
+//         if slStage == 3
+//             stopLoss := PIVOT_LINE - 250
+    
+//     else if currentTradeIsSecondary
+//         if slStage == 1 and close >= (PIVOT_LINE - PIVOT_LINE * 0.004)
+//             stopLoss := BOTTOM_LINE - 200
+//             slStage := 2
+        
+//         if slStage == 2 and close >= (TOP_LINE - TOP_LINE * 0.004)
+//             slStage := 3
+        
+//         if slStage == 3
+//             stopLoss := PIVOT_LINE - 250
+    
+//     else if currentTradeIsReentry
+//         stopLoss := PIVOT_LINE - 250
+
+// // ========== STOP LOSS HIT (LONG) - INTRA-BAR CHECK ==========
+// // Using 'low' instead of 'close' to check if SL was hit during the bar
+// if inPosition and low <= stopLoss
+//     // Exit at SL price, not at candle close
+//     exitPrice = stopLoss
+//     pnl = exitPrice - buyEntry
+    
+//     string statusEmoji = ""
+//     bool primaryLossOccurred = false
+    
+//     if pnl > 0
+//         lastTradeWasProfit := true
+//         secondaryConsecutiveLosses := 0
+//         reentryConsecutiveLosses := 0
+        
+//         if currentTradeIsSecondary or currentTradeIsReentry
+//             primaryBlocked := false
+//             reentryDisabled := false
+        
+//         statusEmoji := " ✅"
+    
+//     else
+//         lastTradeWasProfit := false
+        
+//         if currentTradeIsPrimary
+//             primaryBlocked := true
+//             secondaryConsecutiveLosses := 0
+//             primaryLossOccurred := true
+//             statusEmoji := " 🟡"
+        
+//         else if currentTradeIsSecondary
+//             secondaryConsecutiveLosses += 1
+            
+//             if secondaryConsecutiveLosses >= 2
+//                 bothStrategiesDisabled := true
+//                 reentryDisabled := true
+//                 statusEmoji := " 🛑"
+//             else
+//                 statusEmoji := " ⚠️"
+        
+//         else if currentTradeIsReentry
+//             reentryConsecutiveLosses += 1
+            
+//             if reentryConsecutiveLosses >= 2
+//                 reentryDisabled := true
+//                 statusEmoji := " 🔴"
+//             else
+//                 statusEmoji := " 🟠"
+    
+//     inPosition := false
+//     buyEntry := na
+//     stopLoss := na
+//     slStage := 0
+    
+//     tradeName = currentTradeIsPrimary ? "PRI" : currentTradeIsSecondary ? "SEC" : "RE"
+//     pnlSign = pnl > 0 ? "+" : ""
+//     labelText = tradeName + " " + pnlSign + str.tostring(pnl, "#") + statusEmoji
+//     labelColor = pnl > 0 ? color.new(#006400, 0) : color.new(#8B0000, 0)
+    
+//     label.new(bar_index, high, text=labelText, color=labelColor, textcolor=color.white, style=label.style_label_down, size=size.normal)
+    
+//     currentTradeIsPrimary := false
+//     currentTradeIsSecondary := false
+//     currentTradeIsReentry := false
+    
+//     // ========================================
+//     // ========== TRIGGER SHORT AFTER PRIMARY LOSS ==========
+//     // ========================================
+//     if primaryLossOccurred and enableShortAfterPrimaryLoss
+//         shortEntry := close
+//         shortStopLoss := close + 400
+//         inShortPosition := true
+//         shortEntryBar := bar_index
+//         label.new(bar_index, high * 1.001, text="🔴 SHORT", color=color.new(#8B0000, 0), textcolor=color.white, style=label.style_label_down, size=size.small)
+//     // ========================================
+
+// // ========== PLOT SHAPES (LONG STRATEGIES) ==========
+// plotshape(PRIMARY_BUY, title="Primary", style=shape.triangleup, location=location.belowbar, color=color.new(#006400, 0), size=size.small)
+// plotshape(SECONDARY_BUY, title="Secondary", style=shape.triangleup, location=location.belowbar, color=color.new(#00CED1, 0), size=size.normal)
+// plotshape(REENTRY_BUY, title="Re-Entry", style=shape.triangleup, location=location.belowbar, color=color.new(#CC5500, 0), size=size.normal)
+
+// // ========== PLOT SL & ENTRY (LONG) ==========
+// plot(inPosition ? stopLoss : na, "Stop Loss", color.red, 2, plot.style_linebr)
+// plot(inPosition ? buyEntry : na, "Entry", color.blue, 1, plot.style_linebr)
+
+// // ========================================
+// // ========== RSI DIVERGENCE & EXTREME LEVELS SECTION ==========
+// // ========================================
+
+// // Track pivot highs and lows in price and RSI
+// lookback = 5  // Look back 5 bars for pivot detection
+
+// // Detect pivot highs (peak)
+// pivotHigh = ta.pivothigh(high, lookback, lookback)
+// pivotHighRSI = ta.pivothigh(rsi, lookback, lookback)
+
+// // Detect pivot lows (valley)
+// pivotLow = ta.pivotlow(low, lookback, lookback)
+// pivotLowRSI = ta.pivotlow(rsi, lookback, lookback)
+
+// // Store last pivot values
+// var float lastPivotHighPrice = na
+// var float lastPivotHighRSI = na
+// var int lastPivotHighBar = na
+
+// var float lastPivotLowPrice = na
+// var float lastPivotLowRSI = na
+// var int lastPivotLowBar = na
+
+// // Update pivot high tracking
+// if not na(pivotHigh)
+//     if not na(lastPivotHighPrice)
+//         // Check for NEGATIVE divergence (Bearish)
+//         // Price makes higher high, RSI makes lower high
+//         if high[lookback] > lastPivotHighPrice and pivotHighRSI < lastPivotHighRSI
+//             label.new(bar_index - lookback, high[lookback], text="-DIV", color=color.new(color.red, 0), textcolor=color.white, style=label.style_label_down, size=size.normal, yloc=yloc.abovebar)
+    
+//     lastPivotHighPrice := high[lookback]
+//     lastPivotHighRSI := pivotHighRSI
+//     lastPivotHighBar := bar_index - lookback
+
+// // Update pivot low tracking
+// if not na(pivotLow)
+//     if not na(lastPivotLowPrice)
+//         // Check for POSITIVE divergence (Bullish)
+//         // Price makes lower low, RSI makes higher low
+//         if low[lookback] < lastPivotLowPrice and pivotLowRSI > lastPivotLowRSI
+//             label.new(bar_index - lookback, low[lookback], text="+DIV", color=color.new(color.green, 0), textcolor=color.white, style=label.style_label_up, size=size.normal, yloc=yloc.belowbar)
+    
+//     lastPivotLowPrice := low[lookback]
+//     lastPivotLowRSI := pivotLowRSI
+//     lastPivotLowBar := bar_index - lookback
+
+// // EXTREME OVERBOUGHT LEVEL (RSI > 85)
+// // extremeOverbought = rsi > 85
+// // if extremeOverbought
+// //     label.new(bar_index, high, text="⭕", color=color.new(color.red, 100), textcolor=color.red, style=label.style_label_down, size=size.large, yloc=yloc.abovebar)
+
+// // // EXTREME OVERSOLD LEVEL (RSI < 15)
+// // extremeOversold = rsi < 15
+// // if extremeOversold
+// //     label.new(bar_index, low, text="⭕", color=color.new(color.green, 100), textcolor=color.green, style=label.style_label_up, size=size.large, yloc=yloc.belowbar)
+
+// // ========================================
+// // ========== END OF RSI DIVERGENCE & EXTREME LEVELS SECTION ==========
+// // ========================================
+
+// // ========== TABLE ==========
+// if showTable
+//     var table t = table.new(position=position.bottom_right, columns=3, rows=2, border_width=2, border_color=color.new(#1E3A8A, 0))
+    
+//     table.cell(t, 0, 0, text="LTP", text_color=color.white, bgcolor=color.new(#1E3A8A, 0), text_size=size.small)
+//     table.cell(t, 1, 0, text="STATUS", text_color=color.white, bgcolor=color.new(#1E3A8A, 0), text_size=size.small)
+//     table.cell(t, 2, 0, text="PNL", text_color=color.white, bgcolor=color.new(#1E3A8A, 0), text_size=size.small)
+    
+//     table.cell(t, 0, 1, text=str.tostring(close, "#.##"), text_color=color.white, bgcolor=color.new(#374151, 0), text_size=size.large)
+    
+//     strategyText = "READY"
+//     strategyColor = color.new(#1E40AF, 0)
+    
+//     if bothStrategiesDisabled
+//         strategyText := "🛑 STOP"
+//         strategyColor := color.new(#991B1B, 0)
+//     else if inShortPosition
+//         strategyText := "🔴 SHORT"
+//         strategyColor := color.new(#8B0000, 0)
+//     else if inPosition
+//         if currentTradeIsPrimary
+//             strategyText := "🟢 PRI"
+//             strategyColor := color.new(#15803D, 0)
+//         else if currentTradeIsSecondary
+//             strategyText := "🔵 SEC"
+//             strategyColor := color.new(#00CED1, 0)
+//         else if currentTradeIsReentry
+//             strategyText := "🟠 RE"
+//             strategyColor := color.new(#C2410C, 0)
+//     else if primaryBlocked
+//         if reentryDisabled
+//             strategyText := "🟡 SEC"
+//             strategyColor := color.new(#CA8A04, 0)
+//         else
+//             strategyText := "🟡 S+R"
+//             strategyColor := color.new(#CA8A04, 0)
+//     else if lastTradeWasProfit
+//         strategyText := "✅ ALL"
+//         strategyColor := color.new(#15803D, 0)
+    
+//     table.cell(t, 1, 1, text=strategyText, text_color=color.white, bgcolor=strategyColor, text_size=size.large)
+    
+//     currentPnL = 0.0
+//     if inPosition
+//         currentPnL := close - buyEntry
+//     else if inShortPosition
+//         currentPnL := shortEntry - close
+    
+//     pnlColor = currentPnL > 0 ? color.new(#15803D, 0) : currentPnL < 0 ? color.new(#991B1B, 0) : color.new(#374151, 0)
+//     pnlSign = currentPnL > 0 ? "+" : ""
+//     table.cell(t, 2, 1, text=pnlSign + str.tostring(currentPnL, "#.##"), text_color=color.white, bgcolor=pnlColor, text_size=size.large)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// ========== old with no fresh short only one short =========================
+
+
+
+
+
+
+// // ========== इनपुट ==========
+// fiblength = input.int(264, "Pivot Fibonacci Length", minval=1)
+// showTable = input.bool(true, "Show Position Table")
+// enableReentry = input.bool(true, "Enable Re-Entry Strategy")
+
+// // ========== Fibonacci Pivot Lines ==========
+// maxr = ta.highest(close, fiblength)
+// minr = ta.lowest(close, fiblength)
+// TOP_LINE = maxr
+// BOTTOM_LINE = minr
+// PIVOT_LINE = maxr - 0.50 * (maxr - minr)
+
+// // ========== Plot Lines ==========
+// plot(TOP_LINE, "Top", color.white, 2)
+// plot(PIVOT_LINE, "Pivot", color.white, 1)
+// plot(BOTTOM_LINE, "Bottom", color.white, 2)
+
+// // ========== RSI & SMA ==========
+// rsi = ta.rsi(close, 14)
+// sma2 = ta.sma(close, 2)
+
+// // ========== Position Tracking ==========
+// var bool inPosition = false
+// var float buyEntry = na
+// var float stopLoss = na
+// var int slStage = 0
+// var bool lastTradeWasProfit = false
+// var bool primaryBlocked = false
+// var int secondaryConsecutiveLosses = 0
+// var int reentryConsecutiveLosses = 0
+// var bool bothStrategiesDisabled = false
+// var bool reentryDisabled = false
+// var bool currentTradeIsPrimary = false
+// var bool currentTradeIsSecondary = false
+// var bool currentTradeIsReentry = false
+
+// // ========== Daily Reset ==========
+// newDay = ta.change(time("D"))
+// if newDay
+//     bothStrategiesDisabled := false
+//     secondaryConsecutiveLosses := 0
+//     reentryConsecutiveLosses := 0
+//     reentryDisabled := false
+
+// // ========== Tolerance Ranges ==========
+// toleranceAmount = BOTTOM_LINE * 0.004
+// upperTolerance = BOTTOM_LINE + toleranceAmount
+// lowerTolerance = BOTTOM_LINE - toleranceAmount
+
+// pivotRecoveryThreshold = PIVOT_LINE + (PIVOT_LINE * 0.003)
+// pivotReentryThreshold = PIVOT_LINE + (PIVOT_LINE * 0.002)
+
+// // ========== Plot Zones ==========
+// p1 = plot(upperTolerance, "Upper", color.new(color.green, 80), 1)
+// p2 = plot(lowerTolerance, "Lower", color.new(color.green, 80), 1)
+// fill(p1, p2, color.new(color.green, 90))
+
+// plot(pivotRecoveryThreshold, "Recovery", color.new(color.purple, 50), 2, plot.style_circles)
+// plot(pivotReentryThreshold, "Re-Entry", color.new(color.orange, 70), 1, plot.style_circles)
+// plot(sma2, "SMA2", color.new(color.yellow, 50), 1)
+
+// // ========== RECOVERY LOGIC ==========
+// sma2RecoveryCrossover = ta.crossover(sma2, pivotRecoveryThreshold)
+
+// if bothStrategiesDisabled and sma2RecoveryCrossover and not inPosition
+//     bothStrategiesDisabled := false
+//     primaryBlocked := false
+//     secondaryConsecutiveLosses := 0
+//     reentryConsecutiveLosses := 0
+//     reentryDisabled := false
+//     lastTradeWasProfit := false
+//     label.new(bar_index, high, text="🔄 RESET", color=color.new(color.purple, 0), textcolor=color.white, style=label.style_label_down, size=size.small)
+
+// // ========== PRIMARY STRATEGY ==========
+// rsiInRange = rsi >= 20 and rsi <= 29
+// priceInRange = close >= lowerTolerance and close <= upperTolerance
+// PRIMARY_BUY = rsiInRange and priceInRange and not inPosition and not primaryBlocked and not bothStrategiesDisabled
+
+// // ========== SECONDARY STRATEGY (WITH FILTERS) ==========
+// sma2CrossoverBuy = ta.crossover(sma2, upperTolerance)
+
+// // NEW FILTERS
+// rsiNotOverbought = rsi <= 75  // Don't buy if RSI > 75
+// minDistanceFromPivot = (PIVOT_LINE - upperTolerance) >= 300  // Distance must be >= 300 points
+
+// SECONDARY_BUY_AFTER_LOSS = sma2CrossoverBuy and not inPosition and primaryBlocked and not bothStrategiesDisabled and rsiNotOverbought and minDistanceFromPivot
+// SECONDARY_BUY_AFTER_PROFIT = sma2CrossoverBuy and not inPosition and lastTradeWasProfit and not bothStrategiesDisabled and rsiNotOverbought and minDistanceFromPivot
+
+// SECONDARY_BUY = SECONDARY_BUY_AFTER_LOSS or SECONDARY_BUY_AFTER_PROFIT
+
+// // ========== RE-ENTRY STRATEGY ==========
+// noActivePosition = not inPosition
+// secondaryNotDisabled = not bothStrategiesDisabled
+// noPendingPrimarySecondary = not PRIMARY_BUY and not SECONDARY_BUY
+
+// sma2ReentryCrossover = ta.crossover(sma2, pivotReentryThreshold)
+// safetyCheck = close < (TOP_LINE - 200)
+
+// REENTRY_BUY = enableReentry and sma2ReentryCrossover and noActivePosition and secondaryNotDisabled and noPendingPrimarySecondary and safetyCheck and not reentryDisabled
+
+// // ========== BUY SIGNAL ==========
+// BUY_SIGNAL = PRIMARY_BUY or SECONDARY_BUY or REENTRY_BUY
+
+// // ========== BUY EXECUTION ==========
+// if BUY_SIGNAL
+//     inPosition := true
+//     buyEntry := close
+//     slStage := 1
+    
+//     if PRIMARY_BUY
+//         currentTradeIsPrimary := true
+//         currentTradeIsSecondary := false
+//         currentTradeIsReentry := false
+//         stopLoss := buyEntry - 500
+//         lastTradeWasProfit := false
+//         label.new(bar_index, low, text="🟢 PRI", color=color.new(#006400, 0), textcolor=color.white, style=label.style_label_up, size=size.small)
+    
+//     else if SECONDARY_BUY
+//         currentTradeIsPrimary := false
+//         currentTradeIsSecondary := true
+//         currentTradeIsReentry := false
+        
+//         stopLoss := secondaryConsecutiveLosses >= 1 ? BOTTOM_LINE - 300 : BOTTOM_LINE - 400
+//         lastTradeWasProfit := false
+        
+//         slIcon = secondaryConsecutiveLosses >= 1 ? "⚠️" : ""
+//         // UPDATED COLOR: Cyan for better visibility
+//         label.new(bar_index, low, text="🔵 SEC " + slIcon, color=color.new(#00CED1, 0), textcolor=color.white, style=label.style_label_up, size=size.small)
+    
+//     else if REENTRY_BUY
+//         currentTradeIsPrimary := false
+//         currentTradeIsSecondary := false
+//         currentTradeIsReentry := true
+//         stopLoss := PIVOT_LINE - 250
+//         slStage := 3
+//         lastTradeWasProfit := false
+//         label.new(bar_index, low, text="🟠 RE", color=color.new(#CC5500, 0), textcolor=color.white, style=label.style_label_up, size=size.small)
+
+// // ========== TRAILING STOP LOGIC ==========
+// if inPosition
+//     if currentTradeIsPrimary
+//         if slStage == 1 and close > PIVOT_LINE
+//             stopLoss := PIVOT_LINE - 450
+//             slStage := 2
+        
+//         if slStage == 2 and close >= (TOP_LINE - TOP_LINE * 0.004)
+//             slStage := 3
+        
+//         if slStage == 3
+//             stopLoss := PIVOT_LINE - 250
+    
+//     else if currentTradeIsSecondary
+//         if slStage == 1 and close >= (PIVOT_LINE - PIVOT_LINE * 0.004)
+//             stopLoss := BOTTOM_LINE - 200
+//             slStage := 2
+        
+//         if slStage == 2 and close >= (TOP_LINE - TOP_LINE * 0.004)
+//             slStage := 3
+        
+//         if slStage == 3
+//             stopLoss := PIVOT_LINE - 250
+    
+//     else if currentTradeIsReentry
+//         stopLoss := PIVOT_LINE - 250
+
+// // ========== STOP LOSS HIT ==========
+// if inPosition and close <= stopLoss
+//     exitPrice = close
+//     pnl = exitPrice - buyEntry
+    
+//     string statusEmoji = ""
+    
+//     if pnl > 0
+//         lastTradeWasProfit := true
+//         secondaryConsecutiveLosses := 0
+//         reentryConsecutiveLosses := 0
+        
+//         if currentTradeIsSecondary or currentTradeIsReentry
+//             primaryBlocked := false
+//             reentryDisabled := false
+        
+//         statusEmoji := " ✅"
+    
+//     else
+//         lastTradeWasProfit := false
+        
+//         if currentTradeIsPrimary
+//             primaryBlocked := true
+//             secondaryConsecutiveLosses := 0
+//             statusEmoji := " 🟡"
+        
+//         else if currentTradeIsSecondary
+//             secondaryConsecutiveLosses += 1
+            
+//             if secondaryConsecutiveLosses >= 2
+//                 bothStrategiesDisabled := true
+//                 reentryDisabled := true
+//                 statusEmoji := " 🛑"
+//             else
+//                 statusEmoji := " ⚠️"
+        
+//         else if currentTradeIsReentry
+//             reentryConsecutiveLosses += 1
+            
+//             if reentryConsecutiveLosses >= 2
+//                 reentryDisabled := true
+//                 statusEmoji := " 🔴"
+//             else
+//                 statusEmoji := " 🟠"
+    
+//     inPosition := false
+//     buyEntry := na
+//     stopLoss := na
+//     slStage := 0
+    
+//     tradeName = currentTradeIsPrimary ? "PRI" : currentTradeIsSecondary ? "SEC" : "RE"
+//     pnlSign = pnl > 0 ? "+" : ""
+//     labelText = tradeName + " " + pnlSign + str.tostring(pnl, "#") + statusEmoji
+//     labelColor = pnl > 0 ? color.new(#006400, 0) : color.new(#8B0000, 0)
+    
+//     label.new(bar_index, high, text=labelText, color=labelColor, textcolor=color.white, style=label.style_label_down, size=size.normal)
+    
+//     currentTradeIsPrimary := false
+//     currentTradeIsSecondary := false
+//     currentTradeIsReentry := false
+
+// // ========== PLOT SHAPES ==========
+// plotshape(PRIMARY_BUY, title="Primary", style=shape.triangleup, location=location.belowbar, color=color.new(#006400, 0), size=size.small)
+// plotshape(SECONDARY_BUY, title="Secondary", style=shape.triangleup, location=location.belowbar, color=color.new(#00CED1, 0), size=size.normal)
+// plotshape(REENTRY_BUY, title="Re-Entry", style=shape.triangleup, location=location.belowbar, color=color.new(#CC5500, 0), size=size.normal)
+
+// // ========== PLOT SL & ENTRY ==========
+// plot(inPosition ? stopLoss : na, "Stop Loss", color.red, 2, plot.style_linebr)
+// plot(inPosition ? buyEntry : na, "Entry", color.blue, 1, plot.style_linebr)
+
+// // ========== TABLE ==========
+// if showTable
+//     var table t = table.new(position=position.bottom_right, columns=3, rows=2, border_width=2, border_color=color.new(#1E3A8A, 0))
+    
+//     table.cell(t, 0, 0, text="LTP", text_color=color.white, bgcolor=color.new(#1E3A8A, 0), text_size=size.small)
+//     table.cell(t, 1, 0, text="STATUS", text_color=color.white, bgcolor=color.new(#1E3A8A, 0), text_size=size.small)
+//     table.cell(t, 2, 0, text="PNL", text_color=color.white, bgcolor=color.new(#1E3A8A, 0), text_size=size.small)
+    
+//     table.cell(t, 0, 1, text=str.tostring(close, "#.##"), text_color=color.white, bgcolor=color.new(#374151, 0), text_size=size.large)
+    
+//     strategyText = "READY"
+//     strategyColor = color.new(#1E40AF, 0)
+    
+//     if bothStrategiesDisabled
+//         strategyText := "🛑 STOP"
+//         strategyColor := color.new(#991B1B, 0)
+//     else if inPosition
+//         if currentTradeIsPrimary
+//             strategyText := "🟢 PRI"
+//             strategyColor := color.new(#15803D, 0)
+//         else if currentTradeIsSecondary
+//             strategyText := "🔵 SEC"
+//             strategyColor := color.new(#00CED1, 0)
+//         else if currentTradeIsReentry
+//             strategyText := "🟠 RE"
+//             strategyColor := color.new(#C2410C, 0)
+//     else if primaryBlocked
+//         if reentryDisabled
+//             strategyText := "🟡 SEC"
+//             strategyColor := color.new(#CA8A04, 0)
+//         else
+//             strategyText := "🟡 S+R"
+//             strategyColor := color.new(#CA8A04, 0)
+//     else if lastTradeWasProfit
+//         strategyText := "✅ ALL"
+//         strategyColor := color.new(#15803D, 0)
+    
+//     table.cell(t, 1, 1, text=strategyText, text_color=color.white, bgcolor=strategyColor, text_size=size.large)
+    
+//     currentPnL = inPosition ? (close - buyEntry) : 0.0
+//     pnlColor = currentPnL > 0 ? color.new(#15803D, 0) : currentPnL < 0 ? color.new(#991B1B, 0) : color.new(#374151, 0)
+//     pnlSign = currentPnL > 0 ? "+" : ""
+//     table.cell(t, 2, 1, text=pnlSign + str.tostring(currentPnL, "#.##"), text_color=color.white, bgcolor=pnlColor, text_size=size.large)

@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Algo Ace by Tradeniti - Backtest Report</title>
+    <script src="https://cdn.plot.ly/plotly-2.26.0.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        :root {
+            --bg-primary: #ffffff;
+            --bg-secondary: #f5f7fa;
+            --bg-card: #ffffff;
+            --text-primary: #333333;
+            --text-secondary: #666666;
+            --border-color: #e0e0e0;
+            --gradient-start: #667eea;
+            --gradient-end: #764ba2;
+            --shadow: rgba(0, 0, 0, 0.1);
+            --chart-bg: #f9f9f9;
+        }
+        
+        [data-theme="dark"] {
+            --bg-primary: #1e222d;
+            --bg-secondary: #131722;
+            --bg-card: #2a2e39;
+            --text-primary: #d1d4dc;
+            --text-secondary: #a6acb7;
+            --border-color: #2a2e39;
+            --shadow: rgba(0, 0, 0, 0.3);
+            --chart-bg: #131722;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, var(--gradient-start) 0%, var(--gradient-end) 100%);
+            padding: 20px;
+            color: var(--text-primary);
+            transition: all 0.3s ease;
+        }
+        
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+            background: var(--bg-primary);
+            border-radius: 15px;
+            box-shadow: 0 10px 40px var(--shadow);
+            overflow: hidden;
+        }
+        
+        /* Header */
+        .header {
+            background: linear-gradient(135deg, var(--gradient-start) 0%, var(--gradient-end) 100%);
+            color: white;
+            padding: 50px 40px;
+            text-align: center;
+            position: relative;
+        }
+        
+        .theme-toggle {
+            position: absolute;
+            top: 20px;
+            right: 30px;
+            background: rgba(255, 255, 255, 0.2);
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            color: white;
+            padding: 10px 18px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .theme-toggle:hover {
+            background: rgba(255, 255, 255, 0.3);
+            transform: translateY(-2px);
+        }
+        
+        .header h1 {
+            font-size: 48px;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
+        }
+        
+        .header .subtitle {
+            font-size: 20px;
+            opacity: 0.95;
+            margin-bottom: 10px;
+        }
+        
+        .header .brand {
+            font-size: 16px;
+            opacity: 0.85;
+            font-weight: 600;
+            letter-spacing: 1px;
+        }
+        
+        /* Summary Metrics */
+        .summary {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            padding: 30px;
+            background: var(--bg-secondary);
+        }
+        
+        .metric-card {
+            background: var(--bg-card);
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px var(--shadow);
+            text-align: center;
+            transition: transform 0.3s ease;
+            border: 1px solid var(--border-color);
+        }
+        
+        .metric-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 4px 20px var(--shadow);
+        }
+        
+        .metric-card h3 {
+            color: var(--gradient-start);
+            font-size: 14px;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        
+        .metric-card .value {
+            font-size: 28px;
+            font-weight: bold;
+            color: var(--text-primary);
+        }
+        
+        .metric-card.profit .value {
+            color: #4CAF50;
+        }
+        
+        .metric-card.loss .value {
+            color: #FF6B6B;
+        }
+        
+        /* Sections */
+        .section {
+            padding: 30px;
+            background: var(--bg-primary);
+        }
+        
+        .section-title {
+            font-size: 28px;
+            color: var(--gradient-start);
+            margin-bottom: 20px;
+            border-bottom: 3px solid var(--gradient-start);
+            padding-bottom: 10px;
+        }
+        
+        .chart-section {
+            background: var(--bg-secondary);
+            padding: 30px;
+            margin: 20px 0;
+        }
+        
+        /* Scrollable Table */
+        .table-scroll-container {
+            max-height: 600px;
+            overflow-y: auto;
+            overflow-x: auto;
+            border: 2px solid var(--border-color);
+            border-radius: 10px;
+            margin-top: 20px;
+            box-shadow: 0 2px 10px var(--shadow);
+            background: var(--bg-card);
+        }
+        
+        .table-scroll-container::-webkit-scrollbar {
+            width: 12px;
+            height: 12px;
+        }
+        
+        .table-scroll-container::-webkit-scrollbar-track {
+            background: var(--bg-secondary);
+            border-radius: 10px;
+        }
+        
+        .table-scroll-container::-webkit-scrollbar-thumb {
+            background: var(--gradient-start);
+            border-radius: 10px;
+        }
+        
+        .table-scroll-container::-webkit-scrollbar-thumb:hover {
+            background: var(--gradient-end);
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 14px;
+        }
+        
+        th {
+            background: linear-gradient(135deg, var(--gradient-start) 0%, var(--gradient-end) 100%);
+            color: white;
+            padding: 15px 10px;
+            text-align: left;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            font-size: 12px;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+        
+        td {
+            padding: 12px 10px;
+            border-bottom: 1px solid var(--border-color);
+            background: var(--bg-card);
+            color: var(--text-primary);
+        }
+        
+        tr:hover td {
+            background: var(--bg-secondary);
+        }
+        
+        tr.best-trade td {
+            background: #e8f5e9 !important;
+            border-left: 4px solid #4CAF50;
+            font-weight: 600;
+        }
+        
+        [data-theme="dark"] tr.best-trade td {
+            background: rgba(76, 175, 80, 0.2) !important;
+        }
+        
+        tr.worst-trade td {
+            background: #ffebee !important;
+            border-left: 4px solid #FF6B6B;
+            font-weight: 600;
+        }
+        
+        [data-theme="dark"] tr.worst-trade td {
+            background: rgba(244, 67, 54, 0.2) !important;
+        }
+        
+        .profit {
+            color: #4CAF50;
+            font-weight: bold;
+        }
+        
+        .loss {
+            color: #FF6B6B;
+            font-weight: bold;
+        }
+        
+        /* Badges */
+        .badge {
+            display: inline-block;
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 11px;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .badge-primary {
+            background: #2196F3;
+            color: white;
+        }
+        
+        .badge-secondary {
+            background: #FF9800;
+            color: white;
+        }
+        
+        .badge-reentry1 {
+            background: #9C27B0;
+            color: white;
+        }
+        
+        .badge-short {
+            background: #F44336;
+            color: white;
+        }
+        
+        .badge-exit {
+            background: #607D8B;
+            color: white;
+            font-size: 10px;
+        }
+        
+        /* Highlight Boxes */
+        .highlight-box {
+            background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
+            padding: 20px;
+            border-radius: 10px;
+            margin: 20px 0;
+            border-left: 4px solid var(--gradient-start);
+        }
+        
+        .highlight-box h3 {
+            color: var(--gradient-start);
+            margin-bottom: 10px;
+        }
+        
+        .highlight-box p {
+            font-size: 16px;
+            margin: 5px 0;
+            color: var(--text-primary);
+        }
+        
+        /* Footer */
+        .footer {
+            background: var(--bg-card);
+            color: var(--text-primary);
+            text-align: center;
+            padding: 25px;
+            font-size: 14px;
+            border-top: 2px solid var(--border-color);
+        }
+        
+        .footer .brand-name {
+            font-size: 18px;
+            font-weight: bold;
+            color: var(--gradient-start);
+            text-shadow: 0 0 10px rgba(102, 126, 234, 0.3);
+        }
+        
+        @media (max-width: 768px) {
+            .summary {
+                grid-template-columns: 1fr;
+            }
+            
+            table {
+                font-size: 12px;
+            }
+            
+            th, td {
+                padding: 8px 5px;
+            }
+            
+            .theme-toggle {
+                top: 10px;
+                right: 10px;
+                font-size: 12px;
+                padding: 8px 14px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <button class="theme-toggle" onclick="toggleTheme()">
+                <span id="theme-icon">🌙</span>
+                <span id="theme-text">Dark Mode</span>
+            </button>
+            <h1>📊 SILVERMIC BACKTEST</h1>
+            <div class="subtitle">Comprehensive Trading Strategy Analysis</div>
+            <div class="brand">✨ Algo Ace by Tradeniti ✨</div>
+            <p style="font-size: 13px; margin-top: 15px; opacity: 0.75;">Generated: {{TIMESTAMP}}</p>
+        </div>
+        
+        <!-- Summary Metrics -->
+        <div class="summary">
+            <div class="metric-card">
+                <h3>Initial Capital</h3>
+                <div class="value">{{INITIAL_CAPITAL}}</div>
+            </div>
+            <div class="metric-card profit">
+                <h3>Final Capital</h3>
+                <div class="value">{{FINAL_CAPITAL}}</div>
+            </div>
+            <div class="metric-card">
+                <h3>Total Trades</h3>
+                <div class="value">{{TOTAL_TRADES}}</div>
+            </div>
+            <div class="metric-card profit">
+                <h3>Wins</h3>
+                <div class="value">{{WINS}}</div>
+            </div>
+            <div class="metric-card loss">
+                <h3>Losses</h3>
+                <div class="value">{{LOSSES}}</div>
+            </div>
+            <div class="metric-card">
+                <h3>Win Rate</h3>
+                <div class="value">{{WIN_RATE}}</div>
+            </div>
+            <div class="metric-card profit">
+                <h3>Total PnL</h3>
+                <div class="value">{{TOTAL_PNL}}</div>
+            </div>
+            <div class="metric-card">
+                <h3>ROI</h3>
+                <div class="value">{{ROI}}</div>
+            </div>
+            <div class="metric-card loss">
+                <h3>Max Drawdown</h3>
+                <div class="value">{{MAX_DRAWDOWN}}</div>
+            </div>
+            <div class="metric-card profit">
+                <h3>Avg Win</h3>
+                <div class="value">{{AVG_WIN}}</div>
+            </div>
+            <div class="metric-card loss">
+                <h3>Avg Loss</h3>
+                <div class="value">{{AVG_LOSS}}</div>
+            </div>
+            <div class="metric-card">
+                <h3>Profit Factor</h3>
+                <div class="value">{{PROFIT_FACTOR}}</div>
+            </div>
+        </div>
+        
+        <!-- Best & Worst Trades -->
+        <div class="section">
+            <div class="highlight-box">
+                <h3>🏆 Best Trade</h3>
+                <p>{{BEST_TRADE}}</p>
+            </div>
+            <div class="highlight-box" style="border-left-color: #FF6B6B;">
+                <h3>💔 Worst Trade</h3>
+                <p>{{WORST_TRADE}}</p>
+            </div>
+        </div>
+        
+        <!-- Interactive Price Chart -->
+        <div class="chart-section">
+            <h2 class="section-title">📈 Interactive Price Chart</h2>
+            <p style="margin-bottom: 15px; color: var(--text-secondary); font-size: 14px;">
+                <strong>Zoom:</strong> Scroll wheel | <strong>Pan:</strong> Click & drag | <strong>Reset:</strong> Double-click
+            </p>
+            {{PRICE_CHART}}
+        </div>
+        
+        <!-- Equity Curve - FIXED -->
+        <div class="chart-section">
+            <h2 class="section-title">💰 Equity Curve</h2>
+            {{EQUITY_CHART}}
+        </div>
+        
+        <!-- Strategy Breakdown -->
+        <div class="section">
+            <h2 class="section-title">🎯 Strategy Breakdown</h2>
+            <div class="table-scroll-container" style="max-height: 400px;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Strategy</th>
+                            <th>Total Trades</th>
+                            <th>Wins</th>
+                            <th>Win Rate</th>
+                            <th>Total PnL</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {{STRATEGY_BREAKDOWN}}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        
+        <!-- Detailed Trade Log -->
+        <div class="section">
+            <h2 class="section-title">📋 Detailed Trade Log</h2>
+            <p style="margin-bottom: 15px; color: var(--text-secondary);">
+                <span style="background: #e8f5e9; padding: 5px 10px; border-radius: 5px; margin-right: 10px; color: #333;">🟢 Green = Best Trade</span>
+                <span style="background: #ffebee; padding: 5px 10px; border-radius: 5px; color: #333;">🔴 Red = Worst Trade</span>
+            </p>
+            <div class="table-scroll-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>Entry Date</th>
+                            <th>Exit Date</th>
+                            <th>Type</th>
+                            <th>Entry Price</th>
+                            <th>Exit Price</th>
+                            <th>PnL</th>
+                            <th>Cumulative PnL</th>
+                            <th>ROI</th>
+                            <th>Exit Reason</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {{TRADES_TABLE}}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        
+        <!-- Expenses -->
+        <div class="section">
+            <div class="highlight-box">
+                <h3>💸 Trading Expenses</h3>
+                <p><strong>Total Expenses:</strong> {{TOTAL_EXPENSES}} (₹10 per trade)</p>
+            </div>
+        </div>
+        
+        <!-- Footer -->
+        <div class="footer">
+            <p class="brand-name">ALGO ACE BY TRADENITI</p>
+            <p style="margin-top: 10px; color: var(--text-secondary);">Exact TradingView Logic | Dynamic Trailing SL | Smart Risk Management</p>
+            <p style="margin-top: 15px; font-size: 12px; opacity: 0.7;">Report Generated: {{TIMESTAMP}}</p>
+        </div>
+    </div>
+
+    <script>
+        // Theme Toggle
+        function toggleTheme() {
+            const html = document.documentElement;
+            const currentTheme = html.getAttribute('data-theme');
+            const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+            
+            html.setAttribute('data-theme', newTheme);
+            localStorage.setItem('theme', newTheme);
+            
+            const icon = document.getElementById('theme-icon');
+            const text = document.getElementById('theme-text');
+            
+            if (newTheme === 'dark') {
+                icon.textContent = '☀️';
+                text.textContent = 'Light Mode';
+            } else {
+                icon.textContent = '🌙';
+                text.textContent = 'Dark Mode';
+            }
+            
+            // Update Plotly charts background
+            updateChartTheme(newTheme);
+        }
+        
+        // Load saved theme
+        window.addEventListener('DOMContentLoaded', () => {
+            const savedTheme = localStorage.getItem('theme') || 'light';
+            document.documentElement.setAttribute('data-theme', savedTheme);
+            
+            const icon = document.getElementById('theme-icon');
+            const text = document.getElementById('theme-text');
+            
+            if (savedTheme === 'dark') {
+                icon.textContent = '☀️';
+                text.textContent = 'Light Mode';
+            }
+        });
+        
+        // Update Plotly chart theme
+        function updateChartTheme(theme) {
+            const bgColor = theme === 'dark' ? '#131722' : '#f9f9f9';
+            const textColor = theme === 'dark' ? '#d1d4dc' : '#333333';
+            const gridColor = theme === 'dark' ? '#2a2e39' : '#e0e0e0';
+            
+            if (window.Plotly) {
+                const charts = ['plotly-chart', 'equity-chart'];
+                charts.forEach(chartId => {
+                    const chartDiv = document.getElementById(chartId);
+                    if (chartDiv && chartDiv.data) {
+                        Plotly.relayout(chartId, {
+                            'plot_bgcolor': bgColor,
+                            'paper_bgcolor': bgColor,
+                            'font.color': textColor,
+                            'xaxis.gridcolor': gridColor,
+                            'yaxis.gridcolor': gridColor
+                        });
+                    }
+                });
+            }
+        }
+    </script>
+</body>
+</html>

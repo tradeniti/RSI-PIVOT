@@ -1,0 +1,59 @@
+================================================================================
+🏆 ALGO ACE V2.2 FINAL PRODUCTION - BACKTEST RESULTS 🏆
+================================================================================
+
+Backtest Date: 2025-10-16 08:02:21
+Strategy Version: V2.2 Final Production
+
+PERFORMANCE SUMMARY:
+--------------------------------------------------------------------------------
+Initial Capital:        ₹30,000.00
+Final Capital:          ₹167,123.50
+Net Profit/Loss:        ₹137,123.50
+ROI:                    457.08%
+
+TRADE STATISTICS:
+--------------------------------------------------------------------------------
+Total Trades:           859
+Winning Trades:         350 🎉
+Losing Trades:          509 😢
+Win Rate:               40.75%
+
+Average Win:            ₹1,085.87
+Average Loss:           ₹-477.27
+Profit Factor:          1.56
+Max Drawdown:           31.59%
+
+Best Trade:             #837 - SECONDARY - ₹9,561.00 🎉
+Worst Trade:            #859 - SECONDARY - ₹-2,185.00 😢
+
+STRATEGY BREAKDOWN:
+--------------------------------------------------------------------------------
+
+PRIMARY:
+  Trades:     238
+  Wins:       90
+  Win Rate:   37.82%
+  Total PnL:  ₹35,733.00
+
+SECONDARY:
+  Trades:     330
+  Wins:       130
+  Win Rate:   39.39%
+  Total PnL:  ₹72,027.50
+
+REENTRY-1:
+  Trades:     143
+  Wins:       44
+  Win Rate:   30.77%
+  Total PnL:  ₹10,574.00
+
+SHORT:
+  Trades:     148
+  Wins:       86
+  Win Rate:   58.11%
+  Total PnL:  ₹18,789.00
+
+================================================================================
+END OF BACKTEST RESULTS
+================================================================================

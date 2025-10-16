@@ -38,7 +38,7 @@ def main():
     
     # Initialize and run strategy - CHANGED TO ₹30,000
     print("Running backtest with ₹30,000 initial capital...")
-    strategy = TradingStrategy(initial_capital=50000, expense_per_trade=10)
+    strategy = TradingStrategy(initial_capital=30000, expense_per_trade=10)
     trades = strategy.run(df)
     
     # Save trades to JSON

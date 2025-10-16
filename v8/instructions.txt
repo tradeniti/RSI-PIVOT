@@ -1,0 +1,1511 @@
+I HAVE A TRADING STRATEGY. I WANT TO HAVE AN COMPREHENSIVE BACKTEST REPORT WITH CHARTS, THE TRADING DATA. SPECIALLY WHEN WE BOUTH / SELD AND WHEN WE TOOK EXIT. THE WORST PERFORMER. THE CAHRT THAT WILL SHOW THE BUY ARROW AND SELL ARROW SO I CAN VISUALLY SEE WHEN WE BOUGHT AND WHEN WE SOLD. SO I WILL SHRAE ALL THE FILES SO YOU CAN HELP ME BY GIVEING THE COMPFLETE UPDATRED FILE CODES SO I CAN GENERATE THE VESUALLY AMEZING BAKTEST REPORTS.
+
+i have a few files like : main.py, class_file.py, report_generator.py, template.html. i ahve other fiels too but that files are data fiels and those file do nto need editing.
+
+main.py 
+# main.py - V2 IMPROVED (BEST STRATEGY)
+
+
+import pandas as pd
+import json
+from class_file import TradingStrategy
+from report_generator import ReportGenerator
+from datetime import datetime
+
+
+def calculate_roi_on_invested_capital(trades):
+    """Calculate ROI based on actual margin used"""
+    total_margin_used = 0
+    total_pnl = 0
+    
+    for trade in trades:
+        total_margin_used += trade['margin_used']
+        total_pnl += trade['total_pnl']
+    
+    avg_margin_per_trade = total_margin_used / len(trades) if trades else 0
+    roi_on_invested = (total_pnl / total_margin_used * 100) if total_margin_used > 0 else 0
+    
+    return {
+        'total_margin_used': total_margin_used,
+        'avg_margin_per_trade': avg_margin_per_trade,
+        'roi_on_invested': roi_on_invested,
+        'total_pnl': total_pnl
+    }
+
+
+def save_text_summary(strategy, trades, invested_roi, output_file='backtest_summary.txt'):
+    """Save detailed backtest summary to text file"""
+    with open(output_file, 'w', encoding='utf-8') as f:
+        f.write("="*80 + "\n")
+        f.write("BACKTEST COMPLETE - SILVERMIC (1kg) - V2 IMPROVED\n")
+        f.write("="*80 + "\n")
+        f.write(f"Initial Capital: ₹{strategy.initial_capital:,.2f}\n")
+        f.write(f"Final Capital: ₹{strategy.available_capital:,.2f}\n")
+        f.write(f"Total Trades: {len(trades)}\n")
+        
+        if trades:
+            wins = len([t for t in trades if t['pnl_before_expense'] > 0])
+            total_pnl_before_expense = sum(t['pnl_before_expense'] for t in trades)
+            total_expenses = sum(t['expense'] for t in trades)
+            total_pnl = sum(t['total_pnl'] for t in trades)
+            
+            f.write(f"Wins: {wins} | Losses: {len(trades) - wins} | Win Rate: {(wins/len(trades)*100):.2f}%\n")
+            f.write(f"PnL Before Expenses: ₹{total_pnl_before_expense:,.2f}\n")
+            f.write(f"Total Expenses: ₹{total_expenses:,.2f} (@ ₹{strategy.expense_per_trade}/trade)\n")
+            f.write(f"Net PnL: ₹{total_pnl:,.2f}\n")
+            f.write(f"ROI (on Capital): {((strategy.available_capital - strategy.initial_capital) / strategy.initial_capital * 100):.2f}%\n")
+            f.write(f"Avg ROI (per trade on margin): {sum(t['roi'] for t in trades) / len(trades):.2f}%\n")
+            f.write(f"Max Drawdown: {strategy.max_drawdown:.2f}%\n")
+            
+            f.write("\n Strategy Breakdown:\n")
+            for strat_type in ['PRIMARY', 'SECONDARY', 'REENTRY-1', 'REENTRY-2', 'SHORT']:
+                strat_trades = [t for t in trades if t['type'] == strat_type]
+                if strat_trades:
+                    strat_wins = len([t for t in strat_trades if t['pnl_before_expense'] > 0])
+                    strat_pnl = sum(t['total_pnl'] for t in strat_trades)
+                    f.write(f"  {strat_type}: {len(strat_trades)} trades, {strat_wins} wins ({strat_wins/len(strat_trades)*100:.1f}%), PnL: ₹{strat_pnl:,.2f}\n")
+        
+        f.write("="*80 + "\n\n")
+        
+        # ROI explanation
+        f.write("="*80 + "\n")
+        f.write("💰 ROI EXPLANATION\n")
+        f.write("="*80 + "\n")
+        f.write(f"Total Capital in Account: ₹{strategy.initial_capital:,} (insurance/margin)\n")
+        f.write(f"Total Margin Actually Used: ₹{invested_roi['total_margin_used']:,.2f}\n")
+        f.write(f"Avg Margin per Trade: ₹{invested_roi['avg_margin_per_trade']:,.2f}\n\n")
+        f.write(f"📊 ROI on Total Capital: {((strategy.available_capital - strategy.initial_capital) / strategy.initial_capital * 100):.2f}%\n")
+        f.write(f"🎯 ROI on Invested Capital: {invested_roi['roi_on_invested']:.2f}%\n\n")
+        f.write("Note: ROI on Invested = Return on actual money used in trades\n")
+        f.write("      ROI on Capital = Return on full account balance\n")
+        f.write("="*80 + "\n\n")
+        
+        # Strategy details
+        f.write("="*80 + "\n")
+        f.write("📊 STRATEGY DETAILS\n")
+        f.write("="*80 + "\n")
+        f.write("V2 - IMPROVED Strategy Features:\n")
+        f.write("  ✅ Dynamic trailing SL on PRIMARY\n")
+        f.write("  ✅ Dual REENTRY (REENTRY-1 + REENTRY-2)\n")
+        f.write("  ✅ ₹10/trade expense (80% reduction from original)\n")
+        f.write("  ✅ Exit 11 days before contract expiry\n")
+        f.write("  ✅ SHORT after PRIMARY loss only\n")
+        f.write("="*80 + "\n\n")
+        
+        # Key metrics
+        profit_per_trade = total_pnl / len(trades) if trades else 0
+        f.write("="*80 + "\n")
+        f.write("📈 KEY METRICS\n")
+        f.write("="*80 + "\n")
+        f.write(f"Profit per Trade: ₹{profit_per_trade:,.2f}\n")
+        f.write(f"Expense Ratio: {(total_expenses / total_pnl_before_expense * 100):.2f}%\n")
+        f.write(f"Capital Efficiency: {((total_pnl_before_expense - total_expenses) / total_pnl_before_expense * 100):.2f}%\n")
+        f.write(f"Profit Factor: {(sum(t['pnl_before_expense'] for t in trades if t['pnl_before_expense'] > 0) / abs(sum(t['pnl_before_expense'] for t in trades if t['pnl_before_expense'] < 0))):.2f}\n")
+        f.write(f"Peak Capital: ₹{strategy.peak_capital:,.2f}\n")
+        f.write("="*80 + "\n")
+    
+    print(f"✅ Text summary saved to {output_file}")
+
+
+def main():
+    print("="*80)
+    print("SILVERMIC (1KG) TRADING STRATEGY - V2 IMPROVED (BEST)")
+    print("="*80)
+    
+    # Load data
+    try:
+        df = pd.read_csv('data_new_updated.csv')
+        print(f"\n✅ Loaded {len(df)} bars from data.csv")
+        print(f"📅 Date range: {df['Datetime'].iloc[0]} to {df['Datetime'].iloc[-1]}")
+    except FileNotFoundError:
+        print("\n❌ Error: data.csv not found!")
+        return
+    
+    # Initialize strategy
+    initial_capital = 50000
+    expense_per_trade = 10
+    
+    strategy = TradingStrategy(
+        initial_capital=initial_capital,
+        expense_per_trade=expense_per_trade
+    )
+    
+    print(f"\n📊 V2 Strategy Configuration:")
+    print(f"  ├─ Initial Capital: ₹{initial_capital:,}")
+    print(f"  ├─ Contract: SILVERMIC (1kg)")
+    print(f"  ├─ Margin: 10% of entry price")
+    print(f"  ├─ Quantity: Always 1 lot")
+    print(f"  ├─ Expense per trade: ₹{expense_per_trade}")
+    print(f"  ├─ PRIMARY: Dynamic trailing SL ✅")
+    print(f"  ├─ REENTRY: Dual strategy ✅")
+    print(f"  ├─ SHORT: After PRIMARY loss only ✅")
+    print(f"  └─ Exit before expiry: 11 days ✅")
+    
+    print(f"\n🚀 Starting backtest...\n")
+    
+    # Run backtest
+    trades = strategy.run(df)
+    
+    if not trades:
+        print("\n⚠️ No trades executed!")
+        return
+    
+    # Calculate ROI on invested capital
+    invested_roi = calculate_roi_on_invested_capital(trades)
+    
+    # Prepare data for saving
+    trades_data = {
+        'config': {
+            'initial_capital': initial_capital,
+            'expense_per_trade': expense_per_trade,
+            'contract': 'SILVERMIC',
+            'lot_size': '1kg',
+            'margin_percentage': 10,
+            'backtest_date': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'data_file': 'data_new_updated.csv',
+            'total_bars': len(df),
+            'version': 'V2 - IMPROVED (BEST)',
+            'date_range': {
+                'start': df['Datetime'].iloc[0],
+                'end': df['Datetime'].iloc[-1]
+            },
+            'improvements': {
+                'primary_dynamic_sl': True,
+                'dual_reentry_strategy': True,
+                'expiry_days_before': 11,
+                'reduced_expense': True
+            }
+        },
+        'summary': {
+            'initial_capital': initial_capital,
+            'final_capital': strategy.available_capital,
+            'total_trades': len(trades),
+            'winning_trades': len([t for t in trades if t['pnl_before_expense'] > 0]),
+            'losing_trades': len([t for t in trades if t['pnl_before_expense'] < 0]),
+            'win_rate': (len([t for t in trades if t['pnl_before_expense'] > 0]) / len(trades) * 100) if trades else 0,
+            'total_pnl_before_expense': sum(t['pnl_before_expense'] for t in trades),
+            'total_expenses': sum(t['expense'] for t in trades),
+            'net_pnl': sum(t['total_pnl'] for t in trades),
+            'roi_on_capital': ((strategy.available_capital - initial_capital) / initial_capital * 100),
+            'roi_on_invested': invested_roi['roi_on_invested'],
+            'total_margin_used': invested_roi['total_margin_used'],
+            'avg_margin_per_trade': invested_roi['avg_margin_per_trade'],
+            'avg_roi_per_trade': sum(t['roi'] for t in trades) / len(trades) if trades else 0,
+            'max_drawdown': strategy.max_drawdown,
+            'peak_capital': strategy.peak_capital,
+            'biggest_win': max(t['pnl_before_expense'] for t in trades),
+            'biggest_loss': min(t['pnl_before_expense'] for t in trades)
+        },
+        'strategy_breakdown': {
+            'PRIMARY': {
+                'trades': len([t for t in trades if t['type'] == 'PRIMARY']),
+                'wins': len([t for t in trades if t['type'] == 'PRIMARY' and t['pnl_before_expense'] > 0]),
+                'pnl': sum(t['total_pnl'] for t in trades if t['type'] == 'PRIMARY')
+            },
+            'SECONDARY': {
+                'trades': len([t for t in trades if t['type'] == 'SECONDARY']),
+                'wins': len([t for t in trades if t['type'] == 'SECONDARY' and t['pnl_before_expense'] > 0]),
+                'pnl': sum(t['total_pnl'] for t in trades if t['type'] == 'SECONDARY')
+            },
+            'REENTRY-1': {
+                'trades': len([t for t in trades if t['type'] == 'REENTRY-1']),
+                'wins': len([t for t in trades if t['type'] == 'REENTRY-1' and t['pnl_before_expense'] > 0]),
+                'pnl': sum(t['total_pnl'] for t in trades if t['type'] == 'REENTRY-1')
+            },
+            'REENTRY-2': {
+                'trades': len([t for t in trades if t['type'] == 'REENTRY-2']),
+                'wins': len([t for t in trades if t['type'] == 'REENTRY-2' and t['pnl_before_expense'] > 0]),
+                'pnl': sum(t['total_pnl'] for t in trades if t['type'] == 'REENTRY-2')
+            },
+            'SHORT': {
+                'trades': len([t for t in trades if t['type'] == 'SHORT']),
+                'wins': len([t for t in trades if t['type'] == 'SHORT' and t['pnl_before_expense'] > 0]),
+                'pnl': sum(t['total_pnl'] for t in trades if t['type'] == 'SHORT')
+            }
+        },
+        'trades': trades
+    }
+    
+    # Save JSON
+    with open('trades_report.json', 'w') as f:
+        json.dump(trades_data, f, indent=2)
+    print(f"✅ Trades saved to trades_report.json")
+    
+    # Save CSV
+    trades_df = pd.DataFrame(trades)
+    trades_df.to_csv('trades_output.csv', index=False)
+    print(f"✅ Trades saved to trades_output.csv")
+    
+    # ⭐⭐⭐ SAVE TEXT SUMMARY ⭐⭐⭐
+    print(f"\n📝 Generating text summary...")
+    save_text_summary(strategy, trades, invested_roi, 'backtest_summary.txt')
+    
+    # Generate HTML Report
+    print(f"\n📊 Generating HTML report...")
+    report_gen = ReportGenerator()
+    output_file = report_gen.generate_report('trades_report.json', 'backtest_report.html')
+    
+    # Print sample trades
+    print(f"\n{'='*80}")
+    print("📋 SAMPLE TRADES (Last 10):")
+    print(f"{'='*80}")
+    for trade in trades[-10:]:
+        pnl_symbol = "🟢" if trade['pnl_before_expense'] > 0 else "🔴"
+        print(f"{pnl_symbol} #{trade['trade_number']:3d} | {trade['exit_date']} | "
+              f"{trade['type']:11} | Entry:₹{trade['entry']:8.2f} Exit:₹{trade['exit']:8.2f} | "
+              f"PnL:₹{trade['total_pnl']:+8.2f} | {trade['exit_reason']}")
+    
+    print(f"\n{'='*80}")
+    print(f"✨ BACKTEST COMPLETE - V2 IMPROVED (BEST STRATEGY)")
+    print(f"{'='*80}")
+    print(f"📄 JSON Report: trades_report.json")
+    print(f"📊 CSV Export: trades_output.csv")
+    print(f"📝 Text Summary: backtest_summary.txt")
+    print(f"🌐 HTML Report: {output_file}")
+    print(f"{'='*80}")
+    print(f"\n🎯 RESULTS SUMMARY:")
+    print(f"  ROI: {((strategy.available_capital - initial_capital) / initial_capital * 100):.2f}%")
+    print(f"  Win Rate: {(len([t for t in trades if t['pnl_before_expense'] > 0]) / len(trades) * 100):.2f}%")
+    print(f"  Max Drawdown: {strategy.max_drawdown:.2f}%")
+    print(f"  Final Capital: ₹{strategy.available_capital:,.2f}")
+    print(f"{'='*80}\n")
+
+
+if __name__ == "__main__":
+    main()
+
+
+class_file.py
+# class_file.py - V2 IMPROVED (BEST STRATEGY)
+
+
+import pandas as pd
+import json
+from datetime import datetime
+from pathlib import Path
+
+
+class TradingStrategy:
+    def __init__(self, initial_capital=50000, expense_per_trade=10):
+        """
+        V2 - IMPROVED Strategy (BEST)
+        - Dynamic trailing SL on PRIMARY
+        - Dual REENTRY (REENTRY-1 + REENTRY-2)
+        - ₹10/trade expense
+        - Exit 11 days before expiry
+        """
+        self.initial_capital = initial_capital
+        self.available_capital = initial_capital
+        self.peak_capital = initial_capital
+        self.max_drawdown = 0
+        self.capital_depleted = False
+        self.expense_per_trade = expense_per_trade
+        
+        # Position state
+        self.in_position = False
+        self.in_short = False
+        self.buy_entry = None
+        self.short_entry = None
+        self.stop_loss = None
+        self.short_sl = None
+        self.sl_stage = 0
+        self.position_quantity = 1
+        self.lot_size = 1
+        self.entry_date = None
+        self.margin_blocked = 0
+        
+        # Strategy states
+        self.primary_blocked = False
+        self.both_disabled = False
+        self.reentry1_disabled = False
+        self.last_profit = False
+        self.secondary_losses = 0
+        
+        # Trade log
+        self.trades = []
+        self.current_day = None
+        
+        # Track strategy type
+        self.current_is_primary = False
+        self.current_is_secondary = False
+        self.current_is_reentry1 = False
+        self.current_is_reentry2 = False
+        self.exit_reason = None
+        
+        # Top line history for REENTRY-2
+        self.top_line_history = []
+        
+    def calculate_indicators(self, df, fib_length=264):
+        """Calculate all indicators"""
+        df['Top_Line'] = df['close'].rolling(window=fib_length).max()
+        df['Bottom_Line'] = df['close'].rolling(window=fib_length).min()
+        df['Pivot_Line'] = df['Top_Line'] - 0.50 * (df['Top_Line'] - df['Bottom_Line'])
+        
+        df['Upper_Tolerance'] = df['Bottom_Line'] + (df['Bottom_Line'] * 0.004)
+        df['Lower_Tolerance'] = df['Bottom_Line'] - (df['Bottom_Line'] * 0.004)
+        df['Top_Upper'] = df['Top_Line'] + (df['Top_Line'] * 0.004)
+        df['Top_Lower'] = df['Top_Line'] - (df['Top_Line'] * 0.004)
+        
+        df['Recovery_Threshold'] = df['Pivot_Line'] + (df['Pivot_Line'] * 0.003)
+        df['Reentry_Threshold'] = df['Pivot_Line'] + (df['Pivot_Line'] * 0.002)
+        
+        # RSI
+        delta = df['close'].diff()
+        gain = delta.where(delta > 0, 0).rolling(window=14).mean()
+        loss = -delta.where(delta < 0, 0).rolling(window=14).mean()
+        rs = gain / loss
+        df['RSI'] = 100 - (100 / (1 + rs))
+        
+        df['SMA2'] = df['close'].rolling(window=2).mean()
+        
+        return df
+    
+    def calculate_margin_required(self, price):
+        return price * 0.10
+    
+    def is_expiry_week(self, current_date):
+        """Exit 11 days before 5th of Mar/May/Jul/Sep/Dec"""
+        expiry_months = [3, 5, 7, 9, 12]
+        if current_date.month not in expiry_months:
+            return False
+        if 1 <= current_date.day <= 5:
+            return True
+        if current_date.month in [2, 4, 6, 8, 11]:
+            next_month = current_date.month + 1
+            if next_month in expiry_months and current_date.day >= 22:
+                return True
+        return False
+    
+    def update_top_line_history(self, top_line_value):
+        self.top_line_history.append(top_line_value)
+        if len(self.top_line_history) > 10:
+            self.top_line_history.pop(0)
+    
+    def get_9th_top_line(self):
+        if len(self.top_line_history) >= 9:
+            return self.top_line_history[-9]
+        return None
+    
+    def check_primary_buy(self, row):
+        """PRIMARY: RSI 20-29 + in bottom zone"""
+        if self.in_position or self.in_short or self.primary_blocked or self.both_disabled or self.capital_depleted:
+            return False
+        rsi_ok = 20 <= row['RSI'] <= 29
+        price_ok = row['Lower_Tolerance'] <= row['close'] <= row['Upper_Tolerance']
+        margin_needed = self.calculate_margin_required(row['close'])
+        has_capital = self.available_capital >= margin_needed
+        return rsi_ok and price_ok and has_capital
+    
+    def check_secondary_buy(self, row, prev_row):
+        """SECONDARY: SMA2 cross + filters"""
+        if self.in_position or self.in_short or self.both_disabled or self.capital_depleted:
+            return False
+        sma_cross = (prev_row['SMA2'] <= prev_row['Upper_Tolerance'] and 
+                     row['SMA2'] > row['Upper_Tolerance'])
+        rsi_ok = row['RSI'] <= 75
+        distance_ok = (row['Pivot_Line'] - row['Upper_Tolerance']) >= 300
+        can_trade = self.primary_blocked or self.last_profit
+        margin_needed = self.calculate_margin_required(row['close'])
+        has_capital = self.available_capital >= margin_needed
+        return sma_cross and rsi_ok and distance_ok and can_trade and has_capital
+    
+    def check_reentry1_buy(self, row, prev_row, primary_buy, secondary_buy):
+        """REENTRY-1: Pivot + 0.2% crossover"""
+        if self.in_position or self.in_short or self.both_disabled or self.capital_depleted:
+            return False
+        if primary_buy or secondary_buy:
+            return False
+        if self.reentry1_disabled:
+            return False
+        margin_needed = self.calculate_margin_required(row['close'])
+        has_capital = self.available_capital >= margin_needed
+        if not has_capital:
+            return False
+        sma_cross = (prev_row['SMA2'] <= prev_row['Reentry_Threshold'] and 
+                     row['SMA2'] > row['Reentry_Threshold'])
+        safety = row['close'] < (row['Top_Line'] - 200)
+        return sma_cross and safety
+    
+    def check_reentry2_buy(self, row, prev_row, primary_buy, secondary_buy):
+        """REENTRY-2: 9th TOP_LINE breakout"""
+        if self.in_position or self.in_short or self.both_disabled or self.capital_depleted:
+            return False
+        if primary_buy or secondary_buy:
+            return False
+        if not self.reentry1_disabled:
+            return False
+        margin_needed = self.calculate_margin_required(row['close'])
+        has_capital = self.available_capital >= margin_needed
+        if not has_capital:
+            return False
+        ninth_top = self.get_9th_top_line()
+        if ninth_top is None:
+            return False
+        sma_cross = (prev_row['SMA2'] <= ninth_top and row['SMA2'] > ninth_top)
+        return sma_cross
+    
+    def enter_long(self, row, is_primary, is_secondary, is_reentry1, is_reentry2, idx, current_date):
+        """Execute long entry"""
+        self.margin_blocked = self.calculate_margin_required(row['close'])
+        self.in_position = True
+        self.buy_entry = row['close']
+        self.sl_stage = 1
+        self.entry_date = current_date
+        self.current_is_primary = is_primary
+        self.current_is_secondary = is_secondary
+        self.current_is_reentry1 = is_reentry1
+        self.current_is_reentry2 = is_reentry2
+        
+        if is_primary:
+            # PRIMARY: Dynamic trailing (starts at -500)
+            self.stop_loss = self.buy_entry - 500
+            trade_type = 'PRIMARY'
+        elif is_secondary:
+            if self.secondary_losses >= 1:
+                self.stop_loss = row['Bottom_Line'] - 300
+            else:
+                self.stop_loss = row['Bottom_Line'] - 400
+            trade_type = 'SECONDARY'
+        elif is_reentry1:
+            self.stop_loss = row['Pivot_Line'] - 250
+            max_loss_sl = self.buy_entry - 500
+            self.stop_loss = max(self.stop_loss, max_loss_sl)
+            trade_type = 'REENTRY-1'
+        elif is_reentry2:
+            sl_option1 = self.buy_entry - 400
+            sl_option2 = row['Pivot_Line'] - 250
+            distance_to_pivot = abs(self.buy_entry - row['Pivot_Line'])
+            if distance_to_pivot < 300:
+                self.stop_loss = sl_option2
+            else:
+                self.stop_loss = sl_option1
+            trade_type = 'REENTRY-2'
+        
+        print(f"Bar {idx}: {trade_type} BUY ₹{self.buy_entry:.2f}, SL=₹{self.stop_loss:.2f}")
+    
+    def update_trailing_sl(self, row):
+        """Update trailing stop loss - PRIMARY NOW DYNAMIC"""
+        if not self.in_position:
+            return
+        
+        if self.current_is_primary:
+            # V2: PRIMARY now trails dynamically like SECONDARY
+            if self.sl_stage == 1 and row['close'] >= (row['Pivot_Line'] - row['Pivot_Line'] * 0.004):
+                self.stop_loss = row['Bottom_Line'] - 200
+                self.sl_stage = 2
+            elif self.sl_stage == 2 and row['close'] >= (row['Top_Line'] - row['Top_Line'] * 0.004):
+                self.sl_stage = 3
+            if self.sl_stage == 3:
+                self.stop_loss = row['Pivot_Line'] - 250
+        
+        elif self.current_is_secondary:
+            if self.sl_stage == 1 and row['close'] >= (row['Pivot_Line'] - row['Pivot_Line'] * 0.004):
+                self.stop_loss = row['Bottom_Line'] - 200
+                self.sl_stage = 2
+            elif self.sl_stage == 2 and row['close'] >= (row['Top_Line'] - row['Top_Line'] * 0.004):
+                self.sl_stage = 3
+            if self.sl_stage == 3:
+                self.stop_loss = row['Pivot_Line'] - 250
+        
+        elif self.current_is_reentry1:
+            new_sl = row['Pivot_Line'] - 250
+            max_loss_sl = self.buy_entry - 500
+            new_sl = max(new_sl, max_loss_sl)
+            if new_sl > self.stop_loss:
+                self.stop_loss = new_sl
+        
+        elif self.current_is_reentry2:
+            new_sl = row['Pivot_Line'] - 250
+            if new_sl > self.stop_loss:
+                self.stop_loss = new_sl
+    
+    def check_expiry_exit(self, row, idx, current_date):
+        if not self.in_position:
+            return
+        if self.is_expiry_week(current_date):
+            self.exit_reason = "Contract Expiry (11 days)"
+            self._execute_exit(row, idx, current_date, row['close'], 'EXPIRY')
+    
+    def check_long_exit(self, row, idx, current_date):
+        if not self.in_position:
+            return
+        if row['low'] <= self.stop_loss:
+            if self.sl_stage == 3:
+                self.exit_reason = "Trailing Stop Loss"
+            elif self.sl_stage == 2:
+                self.exit_reason = "Stage 2 Stop Loss"
+            else:
+                self.exit_reason = "Initial Stop Loss"
+            self._execute_exit(row, idx, current_date, self.stop_loss, 'SL')
+    
+    def _execute_exit(self, row, idx, current_date, exit_price, exit_type):
+        pnl_per_lot = (exit_price - self.buy_entry) * self.lot_size
+        total_pnl = pnl_per_lot * self.position_quantity
+        pnl_before_expense = total_pnl
+        total_pnl -= self.expense_per_trade
+        
+        self.available_capital += total_pnl
+        self.peak_capital = max(self.peak_capital, self.available_capital)
+        drawdown = (self.peak_capital - self.available_capital) / self.peak_capital * 100 if self.peak_capital > 0 else 0
+        self.max_drawdown = max(self.max_drawdown, drawdown)
+        
+        if self.available_capital <= 0:
+            self.capital_depleted = True
+        
+        if pnl_before_expense > 0:
+            self.last_profit = True
+            self.secondary_losses = 0
+            if self.current_is_secondary or self.current_is_reentry1 or self.current_is_reentry2:
+                self.primary_blocked = False
+            if self.current_is_reentry2:
+                self.reentry1_disabled = False
+            status = 'PROFIT' if exit_type != 'EXPIRY' else 'PROFIT_EXPIRY'
+        else:
+            self.last_profit = False
+            if self.current_is_primary:
+                self.primary_blocked = True
+                self.secondary_losses = 0
+                if not self.capital_depleted:
+                    self.enter_short(row, idx, current_date)
+                status = 'PRIMARY_LOSS'
+            elif self.current_is_secondary:
+                self.secondary_losses += 1
+                if self.secondary_losses >= 2:
+                    self.both_disabled = True
+                    self.reentry1_disabled = True
+                status = 'SECONDARY_LOSS'
+            elif self.current_is_reentry1:
+                self.reentry1_disabled = True
+                status = 'REENTRY1_LOSS'
+            elif self.current_is_reentry2:
+                status = 'REENTRY2_LOSS'
+        
+        if self.current_is_primary:
+            trade_type = 'PRIMARY'
+        elif self.current_is_secondary:
+            trade_type = 'SECONDARY'
+        elif self.current_is_reentry1:
+            trade_type = 'REENTRY-1'
+        elif self.current_is_reentry2:
+            trade_type = 'REENTRY-2'
+        else:
+            trade_type = 'UNKNOWN'
+        
+        roi = (pnl_before_expense / self.margin_blocked) * 100 if self.margin_blocked > 0 else 0
+        
+        print(f"Bar {idx}: {trade_type} EXIT ₹{exit_price:.2f}, PnL=₹{total_pnl:.2f}")
+        
+        self.trades.append({
+            'trade_number': len(self.trades) + 1,
+            'bar': idx,
+            'entry_date': self.entry_date.strftime('%Y-%m-%d %H:%M:%S') if self.entry_date else '',
+            'exit_date': current_date.strftime('%Y-%m-%d'),
+            'type': trade_type,
+            'entry': self.buy_entry,
+            'exit': exit_price,
+            'quantity': self.position_quantity,
+            'pnl_per_lot': pnl_per_lot,
+            'pnl_before_expense': pnl_before_expense,
+            'expense': self.expense_per_trade,
+            'total_pnl': total_pnl,
+            'roi': roi,
+            'status': status,
+            'exit_reason': self.exit_reason,
+            'margin_used': self.margin_blocked,
+            'capital_after': self.available_capital,
+            'sl_stage': self.sl_stage,
+            'stop_loss': self.stop_loss
+        })
+        
+        self.in_position = False
+        self.buy_entry = None
+        self.stop_loss = None
+        self.sl_stage = 0
+        self.margin_blocked = 0
+        self.current_is_primary = False
+        self.current_is_secondary = False
+        self.current_is_reentry1 = False
+        self.current_is_reentry2 = False
+        self.exit_reason = None
+    
+    def enter_short(self, row, idx, current_date):
+        """Enter SHORT after PRIMARY loss only"""
+        self.margin_blocked = self.calculate_margin_required(row['close'])
+        self.in_short = True
+        self.short_entry = row['close']
+        self.short_sl = row['close'] + 400
+        self.entry_date = current_date
+        print(f"Bar {idx}: SHORT ₹{self.short_entry:.2f}, SL=₹{self.short_sl:.2f}")
+    
+    def check_short_exit(self, row, prev_row, idx, current_date):
+        if not self.in_short:
+            return
+        
+        exit_triggered = False
+        exit_price = None
+        exit_reason = None
+        
+        if row['high'] >= self.short_sl:
+            exit_triggered = True
+            exit_price = self.short_sl
+            exit_reason = "Stop Loss"
+        else:
+            sma_cross = (prev_row['SMA2'] <= prev_row['Upper_Tolerance'] and 
+                         row['SMA2'] > row['Upper_Tolerance'])
+            pnl = self.short_entry - row['close']
+            if sma_cross and pnl > 0:
+                exit_triggered = True
+                exit_price = row['close']
+                exit_reason = "SMA2 Crossover"
+        
+        if exit_triggered:
+            pnl_per_lot = (self.short_entry - exit_price) * self.lot_size
+            pnl_before_expense = pnl_per_lot
+            total_pnl = pnl_before_expense - self.expense_per_trade
+            
+            self.available_capital += total_pnl
+            self.peak_capital = max(self.peak_capital, self.available_capital)
+            drawdown = (self.peak_capital - self.available_capital) / self.peak_capital * 100 if self.peak_capital > 0 else 0
+            self.max_drawdown = max(self.max_drawdown, drawdown)
+            
+            if self.available_capital <= 0:
+                self.capital_depleted = True
+            
+            status = 'PROFIT' if pnl_before_expense > 0 else 'LOSS'
+            roi = (pnl_before_expense / self.margin_blocked) * 100 if self.margin_blocked > 0 else 0
+            
+            print(f"Bar {idx}: SHORT EXIT ₹{exit_price:.2f}, PnL=₹{total_pnl:.2f}")
+            
+            self.trades.append({
+                'trade_number': len(self.trades) + 1,
+                'bar': idx,
+                'entry_date': self.entry_date.strftime('%Y-%m-%d %H:%M:%S') if self.entry_date else '',
+                'exit_date': current_date.strftime('%Y-%m-%d'),
+                'type': 'SHORT',
+                'entry': self.short_entry,
+                'exit': exit_price,
+                'quantity': self.position_quantity,
+                'pnl_per_lot': pnl_per_lot,
+                'pnl_before_expense': pnl_before_expense,
+                'expense': self.expense_per_trade,
+                'total_pnl': total_pnl,
+                'roi': roi,
+                'status': status,
+                'exit_reason': exit_reason,
+                'margin_used': self.margin_blocked,
+                'capital_after': self.available_capital,
+                'sl_stage': 0,
+                'stop_loss': self.short_sl
+            })
+            self.in_short = False
+            self.short_entry = None
+            self.short_sl = None
+            self.margin_blocked = 0
+    
+    def daily_reset(self, current_date):
+        if self.current_day is None:
+            self.current_day = current_date
+            return
+        if current_date != self.current_day:
+            self.both_disabled = False
+            self.secondary_losses = 0
+            self.current_day = current_date
+    
+    def recovery_reset(self, row, prev_row):
+        sma_cross = (prev_row['SMA2'] <= prev_row['Recovery_Threshold'] and 
+                     row['SMA2'] > row['Recovery_Threshold'])
+        if self.both_disabled and sma_cross and not self.in_position and not self.in_short:
+            self.both_disabled = False
+            self.primary_blocked = False
+            self.secondary_losses = 0
+            self.reentry1_disabled = False
+            self.last_profit = False
+    
+    def run(self, df):
+        df = self.calculate_indicators(df)
+        
+        for i in range(264, len(df)):
+            if self.capital_depleted:
+                print(f"\n❌ Trading stopped - Capital depleted")
+                break
+            
+            row = df.iloc[i]
+            prev_row = df.iloc[i-1]
+            current_date = pd.to_datetime(row['Datetime']).date()
+            
+            self.update_top_line_history(row['Top_Line'])
+            self.daily_reset(current_date)
+            self.recovery_reset(row, prev_row)
+            self.check_expiry_exit(row, i, current_date)
+            self.check_short_exit(row, prev_row, i, current_date)
+            self.check_long_exit(row, i, current_date)
+            
+            if self.in_position:
+                self.update_trailing_sl(row)
+            
+            if not self.in_position and not self.is_expiry_week(current_date):
+                primary_buy = self.check_primary_buy(row)
+                secondary_buy = self.check_secondary_buy(row, prev_row)
+                reentry1_buy = self.check_reentry1_buy(row, prev_row, primary_buy, secondary_buy)
+                reentry2_buy = self.check_reentry2_buy(row, prev_row, primary_buy, secondary_buy)
+                
+                if primary_buy:
+                    self.enter_long(row, True, False, False, False, i, current_date)
+                elif secondary_buy:
+                    self.enter_long(row, False, True, False, False, i, current_date)
+                elif reentry1_buy:
+                    self.enter_long(row, False, False, True, False, i, current_date)
+                elif reentry2_buy:
+                    self.enter_long(row, False, False, False, True, i, current_date)
+        
+        self._print_summary()
+        return self.trades
+    
+    def _print_summary(self):
+        print(f"\n{'='*80}")
+        print(f"BACKTEST COMPLETE - SILVERMIC (1kg) - V2 IMPROVED")
+        print(f"{'='*80}")
+        print(f"Initial Capital: ₹{self.initial_capital:,.2f}")
+        print(f"Final Capital: ₹{self.available_capital:,.2f}")
+        print(f"Total Trades: {len(self.trades)}")
+        
+        if self.trades:
+            wins = len([t for t in self.trades if t['pnl_before_expense'] > 0])
+            print(f"Wins: {wins} | Losses: {len(self.trades) - wins} | Win Rate: {(wins/len(self.trades)*100):.2f}%")
+            print(f"PnL Before Expenses: ₹{sum(t['pnl_before_expense'] for t in self.trades):,.2f}")
+            print(f"Total Expenses: ₹{sum(t['expense'] for t in self.trades):,.2f}")
+            print(f"Net PnL: ₹{sum(t['total_pnl'] for t in self.trades):,.2f}")
+            print(f"ROI: {((self.available_capital - self.initial_capital) / self.initial_capital * 100):.2f}%")
+            print(f"Max Drawdown: {self.max_drawdown:.2f}%")
+            
+            print(f"\n Strategy Breakdown:")
+            for strategy in ['PRIMARY', 'SECONDARY', 'REENTRY-1', 'REENTRY-2', 'SHORT']:
+                strat_trades = [t for t in self.trades if t['type'] == strategy]
+                if strat_trades:
+                    strat_wins = len([t for t in strat_trades if t['pnl_before_expense'] > 0])
+                    strat_pnl = sum(t['total_pnl'] for t in strat_trades)
+                    print(f"  {strategy}: {len(strat_trades)} trades, {strat_wins} wins ({strat_wins/len(strat_trades)*100:.1f}%), PnL: ₹{strat_pnl:,.2f}")
+        
+        print(f"{'='*80}\n")
+
+report_generator.py
+# report_generator.py - SIMPLIFIED VERSION
+
+
+import json
+import pandas as pd
+from datetime import datetime
+from pathlib import Path
+
+
+class ReportGenerator:
+    """Generate HTML reports from JSON trade data"""
+    
+    def __init__(self):
+        self.template_file = 'template.html'
+    
+    def load_trades_data(self, json_file):
+        """Load trades from JSON file"""
+        with open(json_file, 'r') as f:
+            return json.load(f)
+    
+    def calculate_monthly_stats(self, trades):
+        """Calculate monthly statistics"""
+        monthly_data = {}
+        
+        for trade in trades:
+            exit_date = datetime.strptime(trade['exit_date'], '%Y-%m-%d')
+            month_key = exit_date.strftime('%Y-%m')
+            month_name = exit_date.strftime('%B %Y')
+            
+            if month_key not in monthly_data:
+                monthly_data[month_key] = {
+                    'month_name': month_name,
+                    'trades': [],
+                    'total_trades': 0,
+                    'winning_trades': 0,
+                    'losing_trades': 0,
+                    'pnl_before_expense': 0,
+                    'expenses': 0,
+                    'net_pnl': 0,
+                    'biggest_win': 0,
+                    'biggest_loss': 0,
+                    'primary_trades': 0,
+                    'secondary_trades': 0,
+                    'reentry1_trades': 0,
+                    'reentry2_trades': 0,
+                    'short_trades': 0,
+                    'primary_wins': 0,
+                    'secondary_wins': 0,
+                    'reentry1_wins': 0,
+                    'reentry2_wins': 0,
+                    'short_wins': 0
+                }
+            
+            month = monthly_data[month_key]
+            month['trades'].append(trade)
+            month['total_trades'] += 1
+            month['pnl_before_expense'] += trade['pnl_before_expense']
+            month['expenses'] += trade['expense']
+            month['net_pnl'] += trade['total_pnl']
+            
+            if trade['pnl_before_expense'] > 0:
+                month['winning_trades'] += 1
+                month['biggest_win'] = max(month['biggest_win'], trade['pnl_before_expense'])
+            else:
+                month['losing_trades'] += 1
+                month['biggest_loss'] = min(month['biggest_loss'], trade['pnl_before_expense'])
+            
+            # Count by strategy type
+            trade_type = trade['type']
+            if trade_type == 'PRIMARY':
+                month['primary_trades'] += 1
+                if trade['pnl_before_expense'] > 0:
+                    month['primary_wins'] += 1
+            elif trade_type == 'SECONDARY':
+                month['secondary_trades'] += 1
+                if trade['pnl_before_expense'] > 0:
+                    month['secondary_wins'] += 1
+            elif trade_type == 'REENTRY-1':
+                month['reentry1_trades'] += 1
+                if trade['pnl_before_expense'] > 0:
+                    month['reentry1_wins'] += 1
+            elif trade_type == 'REENTRY-2':
+                month['reentry2_trades'] += 1
+                if trade['pnl_before_expense'] > 0:
+                    month['reentry2_wins'] += 1
+            elif trade_type == 'SHORT':
+                month['short_trades'] += 1
+                if trade['pnl_before_expense'] > 0:
+                    month['short_wins'] += 1
+        
+        # Calculate win rates
+        for month_key in monthly_data:
+            month = monthly_data[month_key]
+            month['win_rate'] = (month['winning_trades'] / month['total_trades'] * 100) if month['total_trades'] > 0 else 0
+        
+        return monthly_data
+    
+    def calculate_strategy_performance(self, trades):
+        """Calculate performance by strategy type"""
+        strategy_stats = {
+            'PRIMARY': {'trades': 0, 'wins': 0, 'losses': 0, 'pnl': 0, 'win_rate': 0},
+            'SECONDARY': {'trades': 0, 'wins': 0, 'losses': 0, 'pnl': 0, 'win_rate': 0},
+            'REENTRY-1': {'trades': 0, 'wins': 0, 'losses': 0, 'pnl': 0, 'win_rate': 0},
+            'REENTRY-2': {'trades': 0, 'wins': 0, 'losses': 0, 'pnl': 0, 'win_rate': 0},
+            'SHORT': {'trades': 0, 'wins': 0, 'losses': 0, 'pnl': 0, 'win_rate': 0}
+        }
+        
+        for trade in trades:
+            strategy_type = trade['type']
+            if strategy_type in strategy_stats:
+                strategy_stats[strategy_type]['trades'] += 1
+                strategy_stats[strategy_type]['pnl'] += trade['total_pnl']
+                
+                if trade['pnl_before_expense'] > 0:
+                    strategy_stats[strategy_type]['wins'] += 1
+                else:
+                    strategy_stats[strategy_type]['losses'] += 1
+        
+        # Calculate win rates
+        for strategy in strategy_stats:
+            total = strategy_stats[strategy]['trades']
+            if total > 0:
+                strategy_stats[strategy]['win_rate'] = (strategy_stats[strategy]['wins'] / total * 100)
+        
+        return strategy_stats
+    
+    def generate_report(self, json_file, output_html='backtest_report.html'):
+        """Generate HTML report from JSON data"""
+        
+        # Load data
+        data = self.load_trades_data(json_file)
+        config = data.get('config', {})
+        summary = data.get('summary', {})
+        trades = data.get('trades', [])
+        filter_analysis = data.get('filter_analysis', {})
+        
+        # Calculate additional stats
+        monthly_stats = self.calculate_monthly_stats(trades)
+        strategy_performance = self.calculate_strategy_performance(trades)
+        
+        # Read template
+        try:
+            with open(self.template_file, 'r', encoding='utf-8') as f:
+                template = f.read()
+        except FileNotFoundError:
+            print(f"❌ Error: {self.template_file} not found!")
+            return None
+        
+        # Prepare data for template
+        report_data = {
+            'config': config,
+            'summary': summary,
+            'trades': trades,
+            'monthly_stats': monthly_stats,
+            'strategy_performance': strategy_performance,
+            'filter_analysis': filter_analysis,
+            'generation_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        }
+        
+        # Convert to JSON for embedding in HTML
+        json_data = json.dumps(report_data, indent=2)
+        
+        # Replace placeholder in template
+        html_output = template.replace('{{REPORT_DATA}}', json_data)
+        
+        # Write output
+        with open(output_html, 'w', encoding='utf-8') as f:
+            f.write(html_output)
+        
+        print(f"✅ HTML report generated: {output_html}")
+        return output_html
+
+template.html 
+
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SILVERMIC V2 - Backtest Report</title>
+    
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
+    
+    <style>
+        :root {
+            --profit-color: #28a745;
+            --loss-color: #dc3545;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            padding: 20px 0 40px 0;
+        }
+        
+        .stat-card {
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            transition: transform 0.2s;
+        }
+        
+        .stat-card:hover {
+            transform: translateY(-5px);
+        }
+        
+        .stat-value {
+            font-size: 2rem;
+            font-weight: bold;
+            margin: 10px 0;
+        }
+        
+        .stat-label {
+            font-size: 0.9rem;
+            opacity: 0.8;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        
+        .profit-text { color: var(--profit-color) !important; }
+        .loss-text { color: var(--loss-color) !important; }
+        .badge-profit { background-color: var(--profit-color); }
+        .badge-loss { background-color: var(--loss-color); }
+        
+        [data-bs-theme="dark"] .stat-card {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+        
+        [data-bs-theme="light"] .stat-card {
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            border: 1px solid rgba(0,0,0,0.1);
+        }
+        
+        .theme-toggle {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 1000;
+        }
+        
+        .hero-section {
+            padding: 40px 0;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .hero-title {
+            font-size: 2.5rem;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+        
+        .scrollable-table {
+            max-height: 600px;
+            overflow-y: auto;
+        }
+        
+        .roi-explainer {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        
+        .version-badge {
+            background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 20px;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+
+
+    <button class="btn btn-outline-secondary theme-toggle" id="themeToggle">
+        <i class="bi bi-moon-stars-fill" id="themeIcon"></i>
+    </button>
+
+
+    <div class="container">
+        
+        <!-- Hero Section -->
+        <div class="hero-section">
+            <h1 class="hero-title">
+                <i class="bi bi-graph-up-arrow"></i> SILVERMIC Trading Strategy
+            </h1>
+            <p><span class="version-badge">V2 - IMPROVED (BEST)</span></p>
+            <p class="lead">Dynamic Trailing SL • Dual REENTRY • Low Expenses</p>
+            <p class="text-muted" id="reportDate"></p>
+        </div>
+
+
+        <!-- ROI Explainer -->
+        <div class="roi-explainer">
+            <h5><i class="bi bi-info-circle-fill"></i> Understanding Your Returns</h5>
+            <div class="row mt-3">
+                <div class="col-md-6">
+                    <strong>ROI on Total Capital:</strong> Return on full ₹50,000 account<br>
+                    <small>Shows overall account growth percentage</small>
+                </div>
+                <div class="col-md-6">
+                    <strong>ROI on Invested Capital:</strong> Return on actual margin used<br>
+                    <small>Shows trading efficiency (profit per rupee risked)</small>
+                </div>
+            </div>
+        </div>
+
+
+        <!-- Summary Cards -->
+        <div class="row mb-4">
+            <div class="col-md-3">
+                <div class="stat-card text-center">
+                    <div class="stat-label">Initial Capital</div>
+                    <div class="stat-value" id="initialCapital">₹0</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stat-card text-center">
+                    <div class="stat-label">Final Capital</div>
+                    <div class="stat-value" id="finalCapital">₹0</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stat-card text-center">
+                    <div class="stat-label">Net PnL</div>
+                    <div class="stat-value" id="netPnl">₹0</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stat-card text-center">
+                    <div class="stat-label">ROI (Capital)</div>
+                    <div class="stat-value" id="roi">0%</div>
+                </div>
+            </div>
+        </div>
+
+
+        <!-- ROI Breakdown -->
+        <div class="row mb-4">
+            <div class="col-md-4">
+                <div class="card">
+                    <div class="card-body text-center">
+                        <h6 class="text-muted">Total Margin Used</h6>
+                        <h3 id="totalMarginUsed">₹0</h3>
+                        <small class="text-muted">Sum of all margins</small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card">
+                    <div class="card-body text-center">
+                        <h6 class="text-muted">Avg Margin/Trade</h6>
+                        <h3 id="avgMargin">₹0</h3>
+                        <small class="text-muted">Per trade investment</small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card">
+                    <div class="card-body text-center">
+                        <h6 class="text-muted">ROI (Invested)</h6>
+                        <h3 class="profit-text" id="roiInvested">0%</h3>
+                        <small class="text-muted">On actual money used</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+
+        <!-- Performance Overview -->
+        <div class="row mb-4">
+            <div class="col-md-12">
+                <div class="card">
+                    <div class="card-header bg-primary text-white">
+                        <h5 class="mb-0"><i class="bi bi-bar-chart-fill"></i> Performance Overview</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row text-center">
+                            <div class="col-md-2">
+                                <h6 class="text-muted">Total Trades</h6>
+                                <h3 id="totalTrades">0</h3>
+                            </div>
+                            <div class="col-md-2">
+                                <h6 class="text-muted">Winning Trades</h6>
+                                <h3 class="profit-text" id="winningTrades">0</h3>
+                            </div>
+                            <div class="col-md-2">
+                                <h6 class="text-muted">Losing Trades</h6>
+                                <h3 class="loss-text" id="losingTrades">0</h3>
+                            </div>
+                            <div class="col-md-2">
+                                <h6 class="text-muted">Win Rate</h6>
+                                <h3 id="winRate">0%</h3>
+                            </div>
+                            <div class="col-md-2">
+                                <h6 class="text-muted">Max Drawdown</h6>
+                                <h3 class="loss-text" id="maxDrawdown">0%</h3>
+                            </div>
+                            <div class="col-md-2">
+                                <h6 class="text-muted">Avg ROI/Trade</h6>
+                                <h3 id="avgRoi">0%</h3>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+
+        <!-- PnL Breakdown -->
+        <div class="row mb-4">
+            <div class="col-md-4">
+                <div class="card">
+                    <div class="card-body text-center">
+                        <h6 class="text-muted">PnL Before Expenses</h6>
+                        <h3 id="pnlBeforeExpense">₹0</h3>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card">
+                    <div class="card-body text-center">
+                        <h6 class="text-muted">Total Expenses</h6>
+                        <h3 class="loss-text" id="totalExpenses">₹0</h3>
+                        <small class="text-muted" id="expenseDetails"></small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card">
+                    <div class="card-body text-center">
+                        <h6 class="text-muted">Biggest Win / Loss</h6>
+                        <h3>
+                            <span class="profit-text" id="biggestWin">₹0</span> / 
+                            <span class="loss-text" id="biggestLoss">₹0</span>
+                        </h3>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+
+        <!-- Strategy Performance -->
+        <div class="row mb-4">
+            <div class="col-md-12">
+                <div class="card">
+                    <div class="card-header bg-success text-white">
+                        <h5 class="mb-0"><i class="bi bi-trophy-fill"></i> Strategy Performance</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="table table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>Strategy</th>
+                                        <th>Total Trades</th>
+                                        <th>Wins</th>
+                                        <th>Losses</th>
+                                        <th>Win Rate</th>
+                                        <th>Net PnL</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="strategyPerformanceTable">
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+
+        <!-- Monthly Performance -->
+        <div class="row mb-4">
+            <div class="col-md-12">
+                <div class="card">
+                    <div class="card-header bg-info text-white">
+                        <h5 class="mb-0"><i class="bi bi-calendar3"></i> Monthly Performance</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-responsive scrollable-table">
+                            <table class="table table-hover">
+                                <thead class="sticky-top bg-light">
+                                    <tr>
+                                        <th>Month</th>
+                                        <th>Trades</th>
+                                        <th>Wins</th>
+                                        <th>Win %</th>
+                                        <th>PnL (Before Exp.)</th>
+                                        <th>Expenses</th>
+                                        <th>Net PnL</th>
+                                        <th>Best Strategy</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="monthlyStatsTable">
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+
+        <!-- All Trades -->
+        <div class="row mb-4">
+            <div class="col-md-12">
+                <div class="card">
+                    <div class="card-header bg-dark text-white">
+                        <h5 class="mb-0"><i class="bi bi-list-ul"></i> All Trades</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <input type="text" class="form-control" id="searchTrades" placeholder="🔍 Search trades...">
+                        </div>
+                        <div class="table-responsive scrollable-table">
+                            <table class="table table-striped table-hover">
+                                <thead class="sticky-top">
+                                    <tr>
+                                        <th>#</th>
+                                        <th>Date</th>
+                                        <th>Type</th>
+                                        <th>Entry</th>
+                                        <th>Exit</th>
+                                        <th>Net PnL</th>
+                                        <th>ROI %</th>
+                                        <th>Exit Reason</th>
+                                        <th>Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="allTradesTable">
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+
+        <!-- Footer -->
+        <footer class="text-center text-muted mt-5">
+            <p>Generated on <span id="generationTime"></span></p>
+            <p><small>SILVERMIC (1kg) V2 - IMPROVED Strategy | Best Performance</small></p>
+        </footer>
+
+
+    </div>
+
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <script>
+        const reportData = {{REPORT_DATA}};
+        
+        // Theme Toggle
+        const themeToggle = document.getElementById('themeToggle');
+        const themeIcon = document.getElementById('themeIcon');
+        const htmlElement = document.documentElement;
+        
+        themeToggle.addEventListener('click', () => {
+            const currentTheme = htmlElement.getAttribute('data-bs-theme');
+            const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+            htmlElement.setAttribute('data-bs-theme', newTheme);
+            themeIcon.classList.toggle('bi-moon-stars-fill');
+            themeIcon.classList.toggle('bi-sun-fill');
+        });
+        
+        function formatCurrency(value) {
+            return '₹' + value.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        }
+        
+        function formatPercent(value) {
+            return value.toFixed(2) + '%';
+        }
+        
+        // Populate report date
+        document.getElementById('reportDate').textContent = `Generated: ${reportData.generation_time}`;
+        document.getElementById('initialCapital').textContent = formatCurrency(reportData.summary.initial_capital);
+        document.getElementById('finalCapital').textContent = formatCurrency(reportData.summary.final_capital);
+        
+        const netPnl = reportData.summary.net_pnl;
+        const netPnlElement = document.getElementById('netPnl');
+        netPnlElement.textContent = formatCurrency(netPnl);
+        netPnlElement.classList.add(netPnl >= 0 ? 'profit-text' : 'loss-text');
+        
+        const roi = reportData.summary.roi_on_capital;
+        const roiElement = document.getElementById('roi');
+        roiElement.textContent = formatPercent(roi);
+        roiElement.classList.add(roi >= 0 ? 'profit-text' : 'loss-text');
+        
+        // ROI Breakdown
+        document.getElementById('totalMarginUsed').textContent = formatCurrency(reportData.summary.total_margin_used || 0);
+        document.getElementById('avgMargin').textContent = formatCurrency(reportData.summary.avg_margin_per_trade || 0);
+        document.getElementById('roiInvested').textContent = formatPercent(reportData.summary.roi_on_invested || 0);
+        
+        // Performance
+        document.getElementById('totalTrades').textContent = reportData.summary.total_trades;
+        document.getElementById('winningTrades').textContent = reportData.summary.winning_trades;
+        document.getElementById('losingTrades').textContent = reportData.summary.losing_trades;
+        document.getElementById('winRate').textContent = formatPercent(reportData.summary.win_rate);
+        document.getElementById('maxDrawdown').textContent = formatPercent(reportData.summary.max_drawdown);
+        document.getElementById('avgRoi').textContent = formatPercent(reportData.summary.avg_roi_per_trade);
+        
+        // PnL
+        document.getElementById('pnlBeforeExpense').textContent = formatCurrency(reportData.summary.total_pnl_before_expense);
+        document.getElementById('totalExpenses').textContent = formatCurrency(reportData.summary.total_expenses);
+        document.getElementById('expenseDetails').textContent = `(${reportData.summary.total_trades} trades × ₹${reportData.config.expense_per_trade})`;
+        document.getElementById('biggestWin').textContent = formatCurrency(reportData.summary.biggest_win);
+        document.getElementById('biggestLoss').textContent = formatCurrency(reportData.summary.biggest_loss);
+        
+        // Strategy Performance
+        const strategyTable = document.getElementById('strategyPerformanceTable');
+        const strategies = ['PRIMARY', 'SECONDARY', 'REENTRY-1', 'REENTRY-2', 'SHORT'];
+        
+        strategies.forEach(strategy => {
+            const data = reportData.strategy_performance[strategy];
+            if (data && data.trades > 0) {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td><span class="badge bg-primary">${strategy}</span></td>
+                    <td>${data.trades}</td>
+                    <td class="profit-text">${data.wins}</td>
+                    <td class="loss-text">${data.losses}</td>
+                    <td>${formatPercent(data.win_rate)}</td>
+                    <td class="${data.pnl >= 0 ? 'profit-text' : 'loss-text'}"><strong>${formatCurrency(data.pnl)}</strong></td>
+                `;
+                strategyTable.appendChild(row);
+            }
+        });
+        
+        // Monthly Stats
+        const monthlyTable = document.getElementById('monthlyStatsTable');
+        const sortedMonths = Object.keys(reportData.monthly_stats || {}).sort();
+        
+        sortedMonths.forEach(monthKey => {
+            const month = reportData.monthly_stats[monthKey];
+            let bestStrategy = 'N/A';
+            let maxWins = 0;
+            ['primary', 'secondary', 'reentry1', 'reentry2', 'short'].forEach(s => {
+                const wins = month[s + '_wins'] || 0;
+                if (wins > maxWins) {
+                    bestStrategy = s.toUpperCase().replace('REENTRY1', 'REENTRY-1').replace('REENTRY2', 'REENTRY-2');
+                    maxWins = wins;
+                }
+            });
+            
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td><strong>${month.month_name}</strong></td>
+                <td>${month.total_trades}</td>
+                <td class="profit-text">${month.winning_trades}</td>
+                <td>${formatPercent(month.win_rate)}</td>
+                <td>${formatCurrency(month.pnl_before_expense)}</td>
+                <td class="loss-text">${formatCurrency(month.expenses)}</td>
+                <td class="${month.net_pnl >= 0 ? 'profit-text' : 'loss-text'}"><strong>${formatCurrency(month.net_pnl)}</strong></td>
+                <td><span class="badge bg-success">${bestStrategy}</span></td>
+            `;
+            monthlyTable.appendChild(row);
+        });
+        
+        // All Trades
+        const allTradesTable = document.getElementById('allTradesTable');
+        reportData.trades.forEach(trade => {
+            const statusBadge = trade.pnl_before_expense >= 0 ? 
+                '<span class="badge badge-profit">WIN</span>' : 
+                '<span class="badge badge-loss">LOSS</span>';
+            
+            const typeBadge = {
+                'PRIMARY': 'bg-primary',
+                'SECONDARY': 'bg-info',
+                'REENTRY-1': 'bg-warning text-dark',
+                'REENTRY-2': 'bg-warning text-dark',
+                'SHORT': 'bg-danger'
+            }[trade.type] || 'bg-secondary';
+            
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td>${trade.trade_number}</td>
+                <td>${trade.exit_date}</td>
+                <td><span class="badge ${typeBadge}">${trade.type}</span></td>
+                <td>${formatCurrency(trade.entry)}</td>
+                <td>${formatCurrency(trade.exit)}</td>
+                <td class="${trade.total_pnl >= 0 ? 'profit-text' : 'loss-text'}"><strong>${formatCurrency(trade.total_pnl)}</strong></td>
+                <td class="${trade.roi >= 0 ? 'profit-text' : 'loss-text'}">${formatPercent(trade.roi)}</td>
+                <td><small>${trade.exit_reason}</small></td>
+                <td>${statusBadge}</td>
+            `;
+            allTradesTable.appendChild(row);
+        });
+        
+        // Search
+        document.getElementById('searchTrades').addEventListener('keyup', function() {
+            const searchTerm = this.value.toLowerCase();
+            const rows = allTradesTable.getElementsByTagName('tr');
+            for (let row of rows) {
+                row.style.display = row.textContent.toLowerCase().includes(searchTerm) ? '' : 'none';
+            }
+        });
+        
+        document.getElementById('generationTime').textContent = reportData.generation_time;
+    </script>
+</body>
+</html>
+
+what things are mising.
+
+1. the correctt dates as entry date and exit date.
+2. tradewize profit and loss. like buy = pnl 0 sold pnl +100 etc.
+3. an comprehensive dyunamic chart with all the trades with arrows on the chart. if you can use and show the data then pls use tradingview lightweight charts https://github.com/tradingview/lightweight-charts and show all the trades on the cahrt with arrows so i can visually see and understand. create seperate file for the chart.
+4. also add an seperate mplotlib cahrt in the backtest_report.html so i can interct with the chart and see when andwhere we bought and shwen and where we sold. 
+
+hyper detaield repoert. pls give me updated compelte code so i can achive this..
+
+1. first tell me what you have understood and what you will give me and start with signle steps. 1 file code at a time.

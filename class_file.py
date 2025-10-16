@@ -1,20 +1,15 @@
-# class_file_v2_original.py - EXACT TRADINGVIEW MATCH + REENTRY-1 NAME
+# class_file.py - ALGO ACE BY TRADENITI - EXACT TRADINGVIEW LOGIC - FIXED PIVOTS
 
 import pandas as pd
 import json
 from datetime import datetime
 from pathlib import Path
 
+
 class TradingStrategy:
-    def __init__(self, initial_capital=30000, expense_per_trade=10):
+    def __init__(self, initial_capital=50000, expense_per_trade=10):
         """
-        🏆 Algo Ace V2 - EXACT TRADINGVIEW MATCH 🏆
-        
-        COMPLETE STRATEGY:
-        ✅ PRIMARY: RSI 20-29, SL 500, Tolerance 0.4%
-        ✅ SECONDARY: Distance 300, RSI ≤75, 2 losses disable both
-        ✅ REENTRY-1: Pivot + 0.2%, Safety Top-200, separate loss counter
-        ✅ SHORT: After PRIMARY loss, ₹400 SL, exit only if profitable
+        Algo Ace by Tradeniti - Exact TradingView Pine Script Logic
         """
         self.initial_capital = initial_capital
         self.available_capital = initial_capital
@@ -41,9 +36,8 @@ class TradingStrategy:
         self.last_profit = False
         self.primary_blocked = False
         self.both_disabled = False
-        self.reentry_disabled = False  # SEPARATE from both_disabled
+        self.reentry_disabled = False
         self.secondary_losses = 0
-        self.reentry_losses = 0  # ✅ SEPARATE COUNTER for reentry
         
         # Track current trade type
         self.current_is_primary = False
@@ -60,15 +54,21 @@ class TradingStrategy:
         
         # Price history for charts
         self.price_history = []
-    
-    def calculate_indicators(self, df, fib_length=264):
-        """Calculate indicators EXACTLY like TradingView"""
         
-        # Manual calculation for Top/Bottom using ta.highest/ta.lowest
+    def calculate_indicators(self, df, fib_length=264):
+        """
+        Calculate indicators EXACTLY like TradingView Pine Script
+        ta.highest(close, 264) = highest of last 264 closes including current bar
+        """
+        
+        # MANUAL CALCULATION for Top_Line and Bottom_Line (100% TradingView match)
+        # This ensures NO LAG and EXACT behavior
         top_line_values = []
         bottom_line_values = []
         
         for i in range(len(df)):
+            # Window: from (i - fib_length + 1) to i (inclusive)
+            # If i < fib_length, use all available bars from 0 to i
             start_idx = max(0, i - fib_length + 1)
             window_data = df['close'].iloc[start_idx:i+1]
             top_line_values.append(window_data.max())
@@ -78,7 +78,7 @@ class TradingStrategy:
         df['Bottom_Line'] = bottom_line_values
         df['Pivot_Line'] = df['Top_Line'] - 0.50 * (df['Top_Line'] - df['Bottom_Line'])
         
-        # Tolerance 0.4%
+        # Tolerance zones
         tolerance_amount = df['Bottom_Line'] * 0.004
         df['Upper_Tolerance'] = df['Bottom_Line'] + tolerance_amount
         df['Lower_Tolerance'] = df['Bottom_Line'] - tolerance_amount
@@ -87,27 +87,15 @@ class TradingStrategy:
         df['Recovery_Threshold'] = df['Pivot_Line'] + (df['Pivot_Line'] * 0.003)
         df['Reentry_Threshold'] = df['Pivot_Line'] + (df['Pivot_Line'] * 0.002)
         
-        # ✅ RSI using RMA (Wilder's Smoothed MA)
-        rsi_length = 14
+        # RSI (Pandas is accurate here)
         delta = df['close'].diff()
-        
-        gain = delta.where(delta > 0, 0)
-        loss = -delta.where(delta < 0, 0)
-        
-        # RMA using ewm with alpha=1/length
-        avg_gain = gain.ewm(alpha=1/rsi_length, adjust=False).mean()
-        avg_loss = loss.ewm(alpha=1/rsi_length, adjust=False).mean()
-        
-        rs = avg_gain / avg_loss
+        gain = delta.where(delta > 0, 0).rolling(window=14).mean()
+        loss = -delta.where(delta < 0, 0).rolling(window=14).mean()
+        rs = gain / loss
         df['RSI'] = 100 - (100 / (1 + rs))
         
-        # Handle edge cases
-        df['RSI'] = df['RSI'].fillna(0)
-        df.loc[avg_loss == 0, 'RSI'] = 100
-        df.loc[avg_gain == 0, 'RSI'] = 0
-        
-        # ✅ SMA2 with min_periods=1 (matches TradingView)
-        df['SMA2'] = df['close'].rolling(window=2, min_periods=1).mean()
+        # SMA2 (Pandas is accurate here)
+        df['SMA2'] = df['close'].rolling(window=2).mean()
         
         return df
     
@@ -128,7 +116,7 @@ class TradingStrategy:
         return False
     
     def check_primary_buy(self, row):
-        """PRIMARY: RSI 20-29 in bottom zone"""
+        """PRIMARY: RSI 20-29 + price in bottom tolerance zone"""
         if self.in_position or self.in_short or self.primary_blocked or self.both_disabled or self.capital_depleted:
             return False
         
@@ -140,11 +128,8 @@ class TradingStrategy:
         return rsi_in_range and price_in_range and has_capital
     
     def check_secondary_buy(self, row, prev_row):
-        """
-        SECONDARY: SMA2 cross with filters (Distance 300, RSI ≤75)
-        Can trade even when SHORT is active (Pine: not inPosition, no check for inShortPosition)
-        """
-        if self.in_position or self.both_disabled or self.capital_depleted:
+        """SECONDARY: SMA2 crossover + RSI <= 75 + distance >= 300"""
+        if self.in_position or self.in_short or self.both_disabled or self.capital_depleted:
             return False
         
         sma_cross = (prev_row['SMA2'] <= prev_row['Upper_Tolerance'] and 
@@ -158,15 +143,12 @@ class TradingStrategy:
         return sma_cross and rsi_ok and distance_ok and can_trade and has_capital
     
     def check_reentry_buy(self, row, prev_row, primary_buy, secondary_buy):
-        """
-        REENTRY-1: Pivot + 0.2% crossover (Safety Top-200)
-        Uses separate reentry_disabled flag and reentry_losses counter
-        """
+        """REENTRY: SMA2 cross Reentry Threshold + safety check"""
         if self.in_position or self.in_short or self.both_disabled or self.capital_depleted:
             return False
         if primary_buy or secondary_buy:
             return False
-        if self.reentry_disabled:  # ✅ Separate flag
+        if self.reentry_disabled:
             return False
         
         margin_needed = self.calculate_margin_required(row['close'])
@@ -204,12 +186,12 @@ class TradingStrategy:
         elif is_reentry:
             self.stop_loss = row['Pivot_Line'] - 250
             self.sl_stage = 3
-            trade_type = 'REENTRY-1'  # ✅ Keep original name
+            trade_type = 'REENTRY-1'
         
         print(f"Bar {idx}: {trade_type} BUY ₹{self.buy_entry:.2f}, SL=₹{self.stop_loss:.2f}")
     
     def update_trailing_sl(self, row):
-        """Update trailing stop loss"""
+        """Update trailing stop loss based on Pine Script logic"""
         if not self.in_position:
             return
         
@@ -246,7 +228,7 @@ class TradingStrategy:
             self._execute_exit(row, idx, current_date, current_datetime, row['close'], 'EXPIRY')
     
     def check_long_exit(self, row, idx, current_date, current_datetime):
-        """✅ Check stop loss hit using LOW (intra-bar check)"""
+        """Check stop loss hit using LOW (intra-bar check) like Pine Script"""
         if not self.in_position:
             return
         
@@ -279,39 +261,27 @@ class TradingStrategy:
         if pnl_before_expense > 0:
             self.last_profit = True
             self.secondary_losses = 0
-            self.reentry_losses = 0  # ✅ Reset reentry counter
-            
             if self.current_is_secondary or self.current_is_reentry:
                 self.primary_blocked = False
                 self.reentry_disabled = False
-            
             status = 'PROFIT' if exit_type != 'EXPIRY' else 'PROFIT_EXPIRY'
         else:
             self.last_profit = False
-            
             if self.current_is_primary:
                 self.primary_blocked = True
                 self.secondary_losses = 0
                 primary_loss_occurred = True
                 status = 'PRIMARY_LOSS'
-            
             elif self.current_is_secondary:
                 self.secondary_losses += 1
                 if self.secondary_losses >= 2:
                     self.both_disabled = True
-                    self.reentry_disabled = True  # ✅ Also disable reentry
+                    self.reentry_disabled = True
                 status = 'SECONDARY_LOSS'
-            
             elif self.current_is_reentry:
-                self.reentry_losses += 1  # ✅ Separate counter
-                if self.reentry_losses >= 2:
-                    self.reentry_disabled = True  # ✅ Only disable reentry, not both
                 status = 'REENTRY_LOSS'
         
-        trade_type = ('PRIMARY' if self.current_is_primary else 
-                     'SECONDARY' if self.current_is_secondary else 
-                     'REENTRY-1')  # ✅ Keep original name
-        
+        trade_type = 'PRIMARY' if self.current_is_primary else 'SECONDARY' if self.current_is_secondary else 'REENTRY-1'
         roi = (pnl_before_expense / self.margin_blocked) * 100 if self.margin_blocked > 0 else 0
         
         print(f"Bar {idx}: {trade_type} EXIT ₹{exit_price:.2f}, PnL=₹{total_pnl:.2f}")
@@ -356,7 +326,7 @@ class TradingStrategy:
             self.enter_short(row, idx, current_date, current_datetime)
     
     def enter_short(self, row, idx, current_date, current_datetime):
-        """SHORT: After PRIMARY loss only"""
+        """Enter SHORT after PRIMARY loss only"""
         self.margin_blocked = self.calculate_margin_required(row['close'])
         self.in_short = True
         self.short_entry = row['close']
@@ -366,11 +336,9 @@ class TradingStrategy:
         print(f"Bar {idx}: SHORT ₹{self.short_entry:.2f}, SL=₹{self.short_sl:.2f}")
     
     def check_short_exit(self, row, prev_row, idx, current_date, current_datetime):
-        """✅ SHORT EXIT: Exit on SMA2 cross ONLY IF PROFITABLE"""
         if not self.in_short:
             return
         
-        # ✅ Check SL hit using HIGH (intra-bar check)
         if row['high'] >= self.short_sl:
             short_pnl = self.short_entry - self.short_sl
             total_pnl = short_pnl - self.expense_per_trade
@@ -380,11 +348,10 @@ class TradingStrategy:
         sma_cross = (prev_row['SMA2'] <= prev_row['Upper_Tolerance'] and 
                      row['SMA2'] > row['Upper_Tolerance'])
         
-        # ✅ CRITICAL: Exit ONLY if profitable
         if sma_cross:
-            current_short_pnl = self.short_entry - row['close']
-            if current_short_pnl > 0:  # ✅ Only exit if in profit
-                total_pnl = current_short_pnl - self.expense_per_trade
+            short_pnl = self.short_entry - row['close']
+            if short_pnl > 0:
+                total_pnl = short_pnl - self.expense_per_trade
                 self._exit_short(row, idx, current_date, current_datetime, row['close'], total_pnl, 'CROSSOVER')
     
     def _exit_short(self, row, idx, current_date, current_datetime, exit_price, total_pnl, exit_reason):
@@ -440,19 +407,16 @@ class TradingStrategy:
         if current_date != self.current_day:
             self.both_disabled = False
             self.secondary_losses = 0
-            self.reentry_losses = 0  # ✅ Reset reentry counter daily
-            self.reentry_disabled = False
             self.current_day = current_date
     
     def recovery_reset(self, row, prev_row):
-        """Recovery logic"""
+        """Recovery logic: SMA2 crossover Recovery Threshold"""
         sma_cross = (prev_row['SMA2'] <= prev_row['Recovery_Threshold'] and 
                      row['SMA2'] > row['Recovery_Threshold'])
         if self.both_disabled and sma_cross and not self.in_position and not self.in_short:
             self.both_disabled = False
             self.primary_blocked = False
             self.secondary_losses = 0
-            self.reentry_losses = 0  # ✅ Reset reentry counter
             self.reentry_disabled = False
             self.last_profit = False
     
@@ -486,7 +450,7 @@ class TradingStrategy:
             if self.in_position:
                 self.update_trailing_sl(row)
             
-            if not self.in_position and not self.is_expiry_week(current_date):
+            if not self.in_position and not self.in_short and not self.is_expiry_week(current_date):
                 primary_buy = self.check_primary_buy(row)
                 secondary_buy = self.check_secondary_buy(row, prev_row)
                 reentry_buy = self.check_reentry_buy(row, prev_row, primary_buy, secondary_buy)
@@ -503,7 +467,7 @@ class TradingStrategy:
     
     def _print_summary(self):
         print(f"\n{'='*80}")
-        print(f"🏆 ALGO ACE - TRADINGVIEW EXACT MATCH 🏆")
+        print(f"BACKTEST COMPLETE - ALGO ACE BY TRADENITI")
         print(f"{'='*80}")
         print(f"Initial Capital: ₹{self.initial_capital:,.2f}")
         print(f"Final Capital: ₹{self.available_capital:,.2f}")
